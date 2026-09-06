@@ -7,7 +7,7 @@ from backtester.domain.market import Candle
 from backtester.domain.trading import Signal
 
 
-class Strategy(ABC):
+class SingleAssetStrategy(ABC):
     """Generate trading signals from market history available so far."""
 
     @abstractmethod
@@ -18,5 +18,3 @@ class Strategy(ABC):
     @abstractmethod
     def reset(self):
         pass
-
-

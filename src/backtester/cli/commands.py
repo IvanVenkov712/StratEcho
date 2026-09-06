@@ -20,7 +20,7 @@ from backtester.execution.costs import CommissionModel, ExecutionModel
 from backtester.metrics.benchmark_comparison import get_differences
 from backtester.portfolio.portfolio import Portfolio
 from backtester.sizing.policy import SizingPlan
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.visualization.export import (
     export_backtest_dashboard,
     export_comparison_dashboard,
@@ -171,7 +171,7 @@ def run_compare_command(args: argparse.Namespace, output: TextIO) -> None:
 def _run_backtest(
     args: argparse.Namespace,
     data_source: DataSource,
-    strategy: Strategy,
+    strategy: SingleAssetStrategy,
     start: str,
     end: str,
 ) -> BacktestResult:
@@ -194,7 +194,7 @@ def _run_backtest(
 
 
 def _run_backtest_with_candles(
-    strategy: Strategy,
+    strategy: SingleAssetStrategy,
     candles: Sequence[Candle],
     symbol: str,
     initial_capital: float,

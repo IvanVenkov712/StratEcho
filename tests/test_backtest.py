@@ -20,7 +20,7 @@ from backtester.domain.trading import (
     OrderExecutionResult,
     OrderExecutionStatus,
 )
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 
 
 ALL_IN_INSTRUCTION = SizingInstruction(mode=SizingMode.ALL_IN, value=None)
@@ -151,7 +151,7 @@ def make_engine(
     resolver: Mock | None = None,
     plan: SizingPlan = DEFAULT_SIZING_PLAN,
 ) -> tuple[BacktestEngine, Mock, Mock]:
-    strategy = Mock(spec=Strategy)
+    strategy = Mock(spec=SingleAssetStrategy)
     strategy.on_candle.side_effect = list(signals)
     broker = broker or make_broker_mock()
     resolver = resolver or make_resolver_mock()

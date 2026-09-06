@@ -33,7 +33,7 @@ from backtester.resolving.resolver import (
     QuantityResolver,
 )
 from backtester.sizing.policy import SizingPlan
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.strategies.breakout import DonchianBreakoutStrategy
 from backtester.strategies.buy_n_hold import BuyAndHoldStrategy
 from backtester.strategies.moving_average import (
@@ -74,7 +74,7 @@ def create_performance_analyzer() -> PerformanceAnalyzer:
     return analyzer
 
 
-def create_strategy(name: str, args: argparse.Namespace) -> Strategy:
+def create_strategy(name: str, args: argparse.Namespace) -> SingleAssetStrategy:
     """Create the named strategy from parsed CLI parameters."""
     if name in {"moving-average", "simple-moving-average"}:
         return SimpleMovingAverageCrossStrategy(

@@ -10,7 +10,7 @@ from backtester.engine.backtest_result import BacktestResult, BacktestRecord
 from backtester.execution.broker import Broker
 from backtester.resolving.resolver import OrderResolver, ResolutionContext
 from backtester.sizing.policy import SizingPlan
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 
 
 class BacktestEngine:
@@ -25,7 +25,7 @@ class BacktestEngine:
 
     def __init__(
             self,
-            strategy: Strategy,
+            strategy: SingleAssetStrategy,
             broker: Broker,
             plan: SizingPlan,
             resolver: OrderResolver,
@@ -52,7 +52,7 @@ class BacktestEngine:
         validate_candles_chronological(validated_data)
 
         self._results = None
-        self._strategy: Strategy = strategy
+        self._strategy: SingleAssetStrategy = strategy
         self._broker = broker
         self._plan = plan
         self._resolver = resolver

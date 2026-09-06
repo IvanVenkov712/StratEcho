@@ -3,13 +3,13 @@ from collections import deque
 from typing import Sequence, Callable
 
 from backtester.domain.market import Candle
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.domain.trading import Signal
 from backtester.strategies.calculators import MovingAverageCalculator, SimpleMovingAverageCalculator, \
     ExponentialMovingAverageCalculator
 
 
-class MeanReversionStrategy(Strategy):
+class MeanReversionStrategy(SingleAssetStrategy):
     def __init__(self,
                  window: int,
                  threshold: float,
@@ -48,7 +48,7 @@ class ExponentialMeanReversionStrategy(MeanReversionStrategy):
         super().__init__(window, threshold, ExponentialMovingAverageCalculator.standard)
 
 
-class _MeanReversionStrategy(Strategy):
+class _MeanReversionStrategy(SingleAssetStrategy):
     """Buy below a fraction of the rolling mean and sell at or above it."""
 
     def __init__(self, window: int, threshold: float):

@@ -1,5 +1,5 @@
 """Trading signals, sizing instructions, orders, and fills."""
-
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
@@ -34,6 +34,10 @@ class OrderExecutionStatus(Enum):
     PRICE_NOT_FOUND = "price_not_found"
     VALIDATION_ERROR = "validation_error"
     UNKNOWN_ERROR = "unknown_error"
+
+@dataclass(frozen=True)
+class MultiAssetSignal:
+    signals: Mapping[str, Signal]
 
 @dataclass(frozen=True)
 class SizingInstruction:
