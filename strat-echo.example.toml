@@ -51,3 +51,5 @@ exit_window = 10
 
 [compare]
 benchmark = "buy-and-hold"
+# Optional comparison dashboard output (independent of [backtest].chart).
+# chart = "reports/comparison-dashboard.png"

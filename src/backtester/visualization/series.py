@@ -29,6 +29,27 @@ def equity_series(
     )
 
 
+def equity_difference_series(
+    strategy: BacktestResult,
+    benchmark: BacktestResult,
+) -> tuple[list[datetime], list[float]]:
+    """Return strategy minus benchmark equity in cash units at matching times.
+
+    Observations must match exactly and be strictly chronological. No alignment,
+    interpolation, or filling is performed, including for unequal lengths.
+    """
+    timestamps, strategy_values = equity_series(strategy)
+    benchmark_timestamps, benchmark_values = equity_series(benchmark)
+    if timestamps != benchmark_timestamps:
+        raise ValueError("Comparison results must have matching timestamps.")
+    if any(later <= earlier for earlier, later in zip(timestamps, timestamps[1:])):
+        raise ValueError("Comparison timestamps must be strictly increasing.")
+    return timestamps, [
+        value - benchmark_value
+        for value, benchmark_value in zip(strategy_values, benchmark_values, strict=True)
+    ]
+
+
 def cash_series(
     result: BacktestResult,
 ) -> tuple[list[datetime], list[float]]:

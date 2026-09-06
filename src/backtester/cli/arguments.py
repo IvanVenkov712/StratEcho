@@ -102,6 +102,12 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_common_arguments(compare_parser)
     _add_strategy_arguments(compare_parser)
     compare_parser.add_argument(
+        "--chart",
+        dest="chart_path",
+        type=Path,
+        help="Save the comparison dashboard to this image path.",
+    )
+    compare_parser.add_argument(
         "--benchmark",
         choices=STRATEGY_CHOICES,
         default=DEFAULT_BENCHMARK,

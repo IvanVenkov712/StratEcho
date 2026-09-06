@@ -145,6 +145,17 @@ python -m backtester.cli backtest --chart reports/backtest-dashboard.png
 The path can also be stored as `chart = "reports/backtest-dashboard.png"`
 under `[backtest]` in the TOML configuration.
 
+The `compare` command saves five panels comparing portfolio equity, drawdown,
+equity difference, cash, and position quantity, followed by a metrics table:
+
+```powershell
+python -m backtester.cli compare --chart reports/comparison-dashboard.png
+```
+
+Set `chart` under `[compare]` to configure this path separately from backtests.
+Both sizing policies appear in the subtitle; the benchmark uses all-in/all-out
+sizing. Strategy lines are blue and solid; benchmark lines are orange and dashed.
+
 Given an already configured `BacktestEngine` named `engine`:
 
 ```python

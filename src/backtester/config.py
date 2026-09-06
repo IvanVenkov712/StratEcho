@@ -53,7 +53,7 @@ _BACKTEST_OPTIONS = (
 ) - {"benchmark"}
 _SECTION_OPTIONS = {
     "backtest": _BACKTEST_OPTIONS,
-    "compare": {"benchmark"},
+    "compare": {"benchmark", "chart"},
 }
 _BACKTEST_ONLY_OPTIONS = {"chart"}
 # ``buffer_rate`` modifies buy quantity resolution after the base sizing

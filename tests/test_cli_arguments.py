@@ -57,12 +57,31 @@ def test_help_uses_strat_echo_program_name(
     assert "usage: strat-echo" in capsys.readouterr().out
 
 
-def test_parse_args_accepts_backtest_chart_path() -> None:
+@pytest.mark.parametrize("command", ["backtest", "compare"])
+def test_parse_args_accepts_chart_path(command: str) -> None:
     chart_path = Path("reports/backtest.png")
 
-    args = parse_args(["backtest", "--chart", str(chart_path)])
+    args = parse_args([command, "--chart", str(chart_path)])
 
     assert args.chart_path == chart_path
+
+
+def test_compare_chart_config_is_separate_and_cli_can_override(tmp_path: Path) -> None:
+    config_path = tmp_path / "charts.toml"
+    config_path.write_text(
+        '[backtest]\nchart = "reports/backtest.png"\n'
+        '[compare]\nchart = "reports/compare.png"\n',
+        encoding="utf-8",
+    )
+    assert parse_args(["compare", "--config", str(config_path)]).chart_path == Path(
+        "reports/compare.png"
+    )
+    assert parse_args(["backtest", "--config", str(config_path)]).chart_path == Path(
+        "reports/backtest.png"
+    )
+    assert parse_args([
+        "compare", "--config", str(config_path), "--chart", "reports/override.png",
+    ]).chart_path == Path("reports/override.png")
 
 
 @pytest.mark.parametrize("anchor", ["start-csv", "end-today", "end-csv"])

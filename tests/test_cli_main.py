@@ -592,10 +592,17 @@ def test_main_sizes_all_in_order_within_execution_cost_budget(
     assert "Rejected orders" not in captured.out
 
 
+@pytest.mark.parametrize("with_chart", [False, True])
 def test_main_compares_strategy_with_benchmark_using_same_csv_data(
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    with_chart: bool,
 ) -> None:
     csv_path = FIXTURES_DIR / "cli_two_candles.csv"
+    chart_path = tmp_path / "comparison.png"
+    exporter = Mock(return_value=chart_path)
+    monkeypatch.setattr(commands, "export_comparison_dashboard", exporter)
 
     exit_code = main(
         [
@@ -614,6 +621,7 @@ def test_main_compares_strategy_with_benchmark_using_same_csv_data(
             "buy-and-hold",
             "--benchmark",
             "moving-average",
+            *(["--chart", str(chart_path)] if with_chart else []),
         ]
     )
 
@@ -640,6 +648,21 @@ def test_main_compares_strategy_with_benchmark_using_same_csv_data(
     assert "Total return" in captured.out
     assert "10.00%" in captured.out
     assert "Number of trades" in captured.out
+    if with_chart:
+        exporter.assert_called_once()
+        strategy_result, benchmark_result, output_path = exporter.call_args.args
+        assert strategy_result is not benchmark_result
+        assert strategy_result.records[-1].snapshot.value == 11000
+        assert benchmark_result.records[-1].snapshot.value == 10000
+        assert output_path == chart_path
+        metadata = exporter.call_args.kwargs
+        assert metadata["strategy_name"] == "Buy and Hold"
+        assert metadata["benchmark_name"].startswith("Simple Moving Average Crossover")
+        assert "Benchmark sizing: all in / all out" in metadata["subtitle"]
+        assert ("Total return", "10.00%", "0.00%") in metadata["metric_rows"]
+        assert f"Chart saved to: {chart_path}" in captured.out
+    else:
+        exporter.assert_not_called()
 
 
 def test_main_uses_all_in_all_out_for_benchmark_regardless_of_strategy_sizing(

@@ -145,6 +145,75 @@ legends, and figure lifecycle management to the caller. The lower-level
 functions in `backtester.visualization.series` return timestamp and value lists
 when non-Matplotlib consumers need the same data.
 
+## Compare a strategy and benchmark
+
+```powershell
+python -m backtester.cli compare --strategy donchian-breakout --benchmark buy-and-hold --chart reports/comparison-dashboard.png
+```
+
+The comparison dashboard has five panels sharing one date axis:
+
+| Panel | Contents | Units |
+| --- | --- | --- |
+| Portfolio equity (largest) | Strategy and benchmark total equity | Cash units |
+| Drawdown | Each portfolio's decline from its own running equity peak | Percentage |
+| Equity difference | Strategy equity minus benchmark equity, with a zero line | Cash units |
+| Cash | Each portfolio's uninvested cash | Cash units |
+| Position quantity | Each portfolio's quantity held in the common symbol | Whole shares |
+
+Strategy lines are blue and solid; benchmark lines are orange and dashed.
+Positive equity differences are shaded green and negative differences red.
+Cash and quantity use recorded end-of-period observations, as do the existing
+single-backtest panels. The figure includes both strategy descriptions, the
+symbol, actual observation dates, and both sizing policies. The CLI appends a
+table of already calculated metrics, using the same formatting as console output.
+
+The benchmark uses all-in/all-out sizing, while the strategy uses the selected
+sizing policy. Both runs use the same starting capital, candles, commission,
+slippage, and cash-buffer settings. Equity includes simulated costs and is not
+normalized; the difference is an amount of money, not a return percentage.
+
+The Python API accepts two completed results:
+
+```python
+from backtester.visualization.comparison import create_comparison_figure
+from backtester.visualization.export import export_comparison_dashboard
+
+figure = create_comparison_figure(
+    strategy_result,
+    benchmark_result,
+    strategy_name="Donchian Breakout",
+    benchmark_name="Buy and Hold",
+    subtitle="Strategy sizing: fixed shares\nBenchmark sizing: all in / all out",
+)
+# The caller owns displaying and closing this figure.
+plt.close(figure)
+
+export_comparison_dashboard(
+    strategy_result,
+    benchmark_result,
+    "reports/comparison-dashboard.png",
+    strategy_name="Donchian Breakout",
+    benchmark_name="Buy and Hold",
+)
+```
+
+Both functions accept optional `metric_rows`: a sequence of preformatted
+`(metric_label, strategy_value, benchmark_value)` strings. Omitting it leaves
+out the table; visualization does not recalculate performance metrics.
+
+Comparison requires equal symbols and initial cash, identical timestamps, and
+strictly increasing observations. Unequal lengths, missing dates, duplicate
+dates, and unordered dates raise `ValueError`; no rows are filled or silently
+aligned. Two empty results produce five empty panels.
+
+The exporter shares the single-backtest export rules: file extension required,
+positive DPI, parent directories created, existing files protected unless
+`overwrite=True`, and the figure closed even when saving fails. TOML chart
+paths are independent: `[compare].chart` controls comparison output and does
+not inherit `[backtest].chart`. An explicit `--chart` overrides the applicable
+configuration value.
+
 ## Empty results and limitations
 
 An empty `BacktestResult` produces the same four labeled panels with empty
@@ -152,8 +221,8 @@ series; creating the dashboard does not fail.
 
 Current limitations are:
 
-- the standard dashboard visualizes one backtest result and one symbol;
-- benchmark overlays are not included;
+- the single-backtest dashboard visualizes one result and one symbol;
+- comparisons support two results for the same symbol and initial capital;
 - price rendering uses closing-price lines rather than OHLC candlesticks;
 - volume is not plotted;
 - rejected order attempts are not plotted;
@@ -170,7 +239,9 @@ Current limitations are:
   series routing, layout calls, and empty results.
 - [`test_visualization_export.py`](../tests/test_visualization_export.py)
   verifies file-path validation, parent-directory creation, overwrite
-  protection, save options, and figure cleanup.
+    protection, save options, and figure cleanup.
+- [`test_visualization_comparison.py`](../tests/test_visualization_comparison.py)
+  verifies comparison panels, styles, metadata, table content, and empty results.
 
 Return to the [project README](../README.md), see
 [Backtesting assumptions](../README.md#backtesting-assumptions), or review the

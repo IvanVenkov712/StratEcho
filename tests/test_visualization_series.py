@@ -10,6 +10,7 @@ from backtester.visualization.series import (
     close_price_series,
     drawdown_series,
     equity_series,
+    equity_difference_series,
     market_value_series,
     position_quantity_series,
     signal_marker_series,
@@ -18,6 +19,43 @@ from backtester.visualization.series import (
 
 
 START = datetime(2026, 1, 1)
+
+
+def test_equity_difference_preserves_sign_and_cash_units() -> None:
+    timestamps = [START + timedelta(days=i) for i in range(3)]
+    strategy = make_result([
+        make_record(t, value=v, cash=v)
+        for t, v in zip(timestamps, [1000, 1050, 950], strict=True)
+    ])
+    benchmark = make_result([
+        make_record(t, value=1000, cash=1000) for t in timestamps
+    ])
+    assert equity_difference_series(strategy, benchmark) == (timestamps, [0, 50, -50])
+
+
+@pytest.mark.parametrize("offsets", [[0], [0, 2], []])
+def test_equity_difference_rejects_mismatched_timestamps(offsets: list[int]) -> None:
+    strategy = make_result([
+        make_record(START + timedelta(days=i), value=1000, cash=1000) for i in [0, 1]
+    ])
+    benchmark = make_result([
+        make_record(START + timedelta(days=i), value=1000, cash=1000) for i in offsets
+    ])
+    with pytest.raises(ValueError, match="matching timestamps"):
+        equity_difference_series(strategy, benchmark)
+
+
+@pytest.mark.parametrize("offsets", [[1, 0], [0, 0]])
+def test_equity_difference_rejects_unordered_or_duplicate_times(offsets: list[int]) -> None:
+    result = make_result([
+        make_record(START + timedelta(days=i), value=1000, cash=1000) for i in offsets
+    ])
+    with pytest.raises(ValueError, match="strictly increasing"):
+        equity_difference_series(result, result)
+
+
+def test_equity_difference_accepts_two_empty_results() -> None:
+    assert equity_difference_series(make_result(), make_result()) == ([], [])
 
 
 def make_candle(timestamp: datetime, close: float = 100.0) -> Candle:

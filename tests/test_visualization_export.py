@@ -21,6 +21,42 @@ RESULT = BacktestResult(
 )
 
 
+@pytest.mark.parametrize("save_fails", [False, True])
+def test_export_comparison_saves_metadata_and_always_closes(
+    tmp_path: Path, save_fails: bool,
+) -> None:
+    path = tmp_path / "reports" / "comparison.png"
+    figure = Mock(spec=Figure)
+    if save_fails:
+        figure.savefig.side_effect = OSError("disk full")
+    metadata = dict(
+        strategy_name="Breakout", benchmark_name="Buy and Hold",
+        subtitle="Sizing policies", metric_rows=[("Total return", "5%", "10%")],
+    )
+    with (
+        patch.object(export, "create_comparison_figure", return_value=figure) as create,
+        patch.object(export.plt, "close") as close,
+    ):
+        if save_fails:
+            with pytest.raises(OSError, match="disk full"):
+                export.export_comparison_dashboard(RESULT, RESULT, path, **metadata)
+        else:
+            assert export.export_comparison_dashboard(RESULT, RESULT, path, **metadata) == path
+        create.assert_called_once_with(RESULT, RESULT, **metadata)
+        figure.savefig.assert_called_once_with(path, dpi=150, bbox_inches="tight")
+        close.assert_called_once_with(figure)
+
+
+def test_export_comparison_protects_existing_file(tmp_path: Path) -> None:
+    path = tmp_path / "comparison.png"
+    path.write_bytes(b"existing")
+    with patch.object(export, "create_comparison_figure") as create:
+        with pytest.raises(FileExistsError):
+            export.export_comparison_dashboard(RESULT, RESULT, path)
+        create.assert_not_called()
+    assert path.read_bytes() == b"existing"
+
+
 def test_export_backtest_dashboard_saves_and_closes_figure(tmp_path: Path) -> None:
     output_path = tmp_path / "reports" / "dashboard.png"
     figure = Mock(spec=Figure)
