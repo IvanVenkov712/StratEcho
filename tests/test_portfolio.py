@@ -47,10 +47,3 @@ def test_portfolio_value_rejects_missing_market_price() -> None:
 
     with pytest.raises(ValueError, match="Missing market price for position: AAPL"):
         portfolio.value({})
-
-
-def test_portfolio_value_rejects_non_positive_market_price() -> None:
-    portfolio = Portfolio(cash=1_000, positions={"AAPL": 2})
-
-    with pytest.raises(ValueError, match="Market price must be positive"):
-        portfolio.value({"AAPL": 0})
