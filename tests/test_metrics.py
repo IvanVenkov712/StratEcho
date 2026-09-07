@@ -25,7 +25,7 @@ from backtester.metrics.metrics import (
 def make_record(timestamp: datetime, portfolio_value: float) -> BacktestRecord:
     candle_price = 100.0
     return BacktestRecord(
-        candle=Candle(
+        frame=Candle(
             timestamp=timestamp,
             open=candle_price,
             high=candle_price,

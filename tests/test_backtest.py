@@ -158,7 +158,7 @@ def make_engine(
     engine = BacktestEngine(
         strategy=strategy,
         broker=broker,
-        plan=plan,
+        allocation=plan,
         resolver=resolver,
         data=candles,
         symbol="AAPL",
@@ -265,7 +265,7 @@ def test_pending_intent_sizes_order_from_portfolio_and_next_open() -> None:
         ),
         context=ResolutionContext(
             timestamp=candles[1].timestamp,
-            cash=1_000,
+            usable_cash=1_000,
             current_quantity=4,
             portfolio_value=1_280,
             reference_price=70,
@@ -423,10 +423,10 @@ def test_record_after_pending_order_uses_current_portfolio_snapshot_at_close() -
 
     result = engine.run()
 
-    assert result.records[0].candle is candles[0]
+    assert result.records[0].frame is candles[0]
     assert result.records[0].snapshot.value == 1_000
     assert result.records[0].snapshot.cash == 1_000
-    assert result.records[1].candle is candles[1]
+    assert result.records[1].frame is candles[1]
     assert result.records[1].snapshot.value == 1_400
     assert result.records[1].snapshot.cash == 200
     portfolio.snapshot.assert_has_calls(

@@ -13,18 +13,18 @@ class ResolutionContext:
 
     timestamp: datetime
     reference_price: float
-    cash: float
+    usable_cash: float
     current_quantity: int
     portfolio_value: float
 
     def __post_init__(self):
-        if self.cash < 0:
+        if self.usable_cash < 0:
             raise ValueError("cash cannot be negative")
 
         if self.current_quantity < 0:
             raise ValueError("current quantity cannot be negative")
 
-        if self.portfolio_value < self.cash:
+        if self.portfolio_value < self.usable_cash:
             raise ValueError("portfolio value cannot be less than cash")
 
         if self.reference_price <= 0:
@@ -110,17 +110,17 @@ class QuantityResolver:
 
     def _resolve_buy_quantity_all_in(self, context: ResolutionContext) -> int:
         return self._resolve_affordable_quantity(
-            context.cash,
+            context.usable_cash,
             context.reference_price,
         )
 
     def _resolve_buy_quantity_percent(self, percent: float, context: ResolutionContext):
-        budget = context.cash * percent
+        budget = context.usable_cash * percent
         return self._resolve_affordable_quantity(budget, context.reference_price)
 
     def _resolve_buy_quantity_up_to(self, max_q: int, context: ResolutionContext):
         return self._resolve_affordable_quantity(
-            context.cash,
+            context.usable_cash,
             context.reference_price,
             max_q,
         )
@@ -154,7 +154,7 @@ class BufferQuantityResolver(QuantityResolver):
         if side == Side.SELL or requested_quantity <= 0:
             return requested_quantity
 
-        buffered_budget = context.cash * (1 - self._buffer_rate)
+        buffered_budget = context.usable_cash * (1 - self._buffer_rate)
 
         return self._capper.cap(
             budget=buffered_budget,

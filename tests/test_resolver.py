@@ -26,7 +26,7 @@ def make_context(
     return ResolutionContext(
         timestamp=TIMESTAMP,
         reference_price=reference_price,
-        cash=cash,
+        usable_cash=cash,
         current_quantity=current_quantity,
         portfolio_value=portfolio_value,
     )
@@ -65,7 +65,7 @@ def test_resolution_context_stores_the_portfolio_snapshot() -> None:
     assert context == ResolutionContext(
         timestamp=TIMESTAMP,
         reference_price=100.0,
-        cash=1_000.0,
+        usable_cash=1_000.0,
         current_quantity=10,
         portfolio_value=2_000.0,
     )

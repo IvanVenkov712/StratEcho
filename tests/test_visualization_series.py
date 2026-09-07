@@ -79,7 +79,7 @@ def make_record(
     signal: Signal = Signal.HOLD,
 ) -> BacktestRecord:
     return BacktestRecord(
-        candle=make_candle(timestamp, close=close),
+        frame=make_candle(timestamp, close=close),
         generated_signal=signal,
         snapshot=PortfolioSnapshot(
             cash=cash,

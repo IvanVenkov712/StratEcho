@@ -84,7 +84,7 @@ class Portfolio:
             positions=self.positions
         )
 
-    def available_cash_for_assets(self, allocation: AssetAllocation) -> dict[str, float]:
+    def usable_cash_per_symbol(self, allocation: AssetAllocation) -> dict[str, float]:
         return {
             symbol: self.cash * weight
             for symbol, (weight, _) in allocation.allocations.items()

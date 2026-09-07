@@ -59,3 +59,27 @@ class MarketFrame:
         for candle in self.candles.values():
             if candle.timestamp != self.timestamp:
                 raise ValueError("All candles should have the same timestamp equal to self.timestamp")
+
+    def open_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.open
+            for symbol, candle in self.candles.items()
+        }
+
+    def close_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.close
+            for symbol, candle in self.candles.items()
+        }
+
+    def high_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.high
+            for symbol, candle in self.candles.items()
+        }
+
+    def low_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.low
+            for symbol, candle in self.candles.items()
+        }

@@ -193,7 +193,7 @@ def test_create_order_resolver_composes_cost_capper_and_cash_buffer() -> None:
     )
     context = ResolutionContext(
         timestamp=datetime(2024, 1, 2),
-        cash=1_000,
+        usable_cash=1_000,
         current_quantity=10,
         portfolio_value=1_600,
         reference_price=60,

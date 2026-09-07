@@ -39,7 +39,7 @@ def populated_result() -> BacktestResult:
     signals = [Signal.BUY, Signal.HOLD, Signal.SELL, Signal.HOLD]
     records = [
         BacktestRecord(
-            candle=Candle(
+            frame=Candle(
                 timestamp=START + timedelta(days=index),
                 open=close,
                 high=close,

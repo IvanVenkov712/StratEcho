@@ -4,20 +4,21 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from backtester.domain.market import Candle
-from backtester.domain.trading import Signal, Trade, OrderExecutionResult, PortfolioSnapshot
+from backtester.domain.market import Candle, MarketFrame
+from backtester.domain.trading import Signal, Trade, OrderExecutionResult, PortfolioSnapshot, MultiAssetSignal
+from backtester.sizing.asset_allocation import AssetAllocation
 
 
 @dataclass(frozen=True)
 class BacktestRecord:
     """Signal and end-of-period portfolio snapshot for one candle."""
-    candle: Candle
-    generated_signal: Signal
+    frame: MarketFrame
+    generated_signal: MultiAssetSignal
     snapshot: PortfolioSnapshot
 
     @property
     def timestamp(self) -> datetime:
-        return self.candle.timestamp
+        return self.frame.timestamp
 
     @property
     def market_value(self) -> float:
@@ -26,7 +27,7 @@ class BacktestRecord:
 @dataclass(frozen=True)
 class BacktestResult:
     """Run metadata, chronological records, trades, and attempted orders."""
-    symbol: str
+    allocation: AssetAllocation
     initial_cash: float
     records: Sequence[BacktestRecord]
     trades: Sequence[Trade]

@@ -3,14 +3,14 @@
 from datetime import datetime
 from typing import Sequence
 
-from backtester.data.validation import validate_candles_chronological
-from backtester.domain.market import Candle
-from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult
+from backtester.data.validation import validate_frames_chronological
+from backtester.domain.market import MarketFrame
+from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult, MultiAssetSignal
 from backtester.engine.backtest_result import BacktestResult, BacktestRecord
 from backtester.execution.broker import Broker
 from backtester.resolving.resolver import OrderResolver, ResolutionContext
-from backtester.sizing.policy import SizingPlan
-from backtester.strategies.base import SingleAssetStrategy
+from backtester.sizing.asset_allocation import AssetAllocation
+from backtester.strategies.multi_asset.base import MultiAssetStrategy
 
 
 class BacktestEngine:
@@ -25,12 +25,11 @@ class BacktestEngine:
 
     def __init__(
             self,
-            strategy: SingleAssetStrategy,
+            strategy: MultiAssetStrategy,
             broker: Broker,
-            plan: SizingPlan,
+            allocation: AssetAllocation,
             resolver: OrderResolver,
-            data: Sequence[Candle],
-            symbol: str
+            data: Sequence[MarketFrame],
     ):
         """Create a backtest engine for one strategy, broker, data set, and symbol.
 
@@ -39,7 +38,7 @@ class BacktestEngine:
                 into a buy, sell, or hold signal.
             broker: Broker responsible for order execution and portfolio
                 accounting.
-            plan: Buy and sell sizing instructions attached to generated order
+            allocation: Buy and sell sizing instructions attached to generated order
                 intents.
             resolver: Component that converts pending intents into whole-share
                 orders using execution costs and the next candle's opening
@@ -49,15 +48,14 @@ class BacktestEngine:
         """
 
         validated_data = tuple(data)
-        validate_candles_chronological(validated_data)
+        validate_frames_chronological(validated_data)
 
         self._results = None
-        self._strategy: SingleAssetStrategy = strategy
+        self._strategy: MultiAssetStrategy = strategy
         self._broker = broker
-        self._plan = plan
+        self._allocation = allocation
         self._resolver = resolver
         self._data = validated_data
-        self._symbol = symbol
         self._initial_cash = broker.portfolio.cash
 
     def run(self) -> BacktestResult:
@@ -76,45 +74,51 @@ class BacktestEngine:
         new signal is generated, and the portfolio is valued at the current
         close.
         """
-        order_executions = []
+        order_executions_total = []
         trades = []
         records = []
-        order_intent = None
+        order_intents = []
 
-        for candle in self._data:
-            if order_intent is not None:
-                order = self._create_order(order_intent, candle)
-                if order is not None:
-                    execution_result = self._execute_pending_order(order, candle)
-                    order_executions.append(execution_result)
-                    if execution_result.trade is not None:
-                        trades.append(execution_result.trade)
+        for frame in self._data:
+            orders = self._create_orders(order_intents, frame)
+            execution_results = self._execute_pending_orders(orders, frame)
+            order_executions_total.extend(execution_results)
+            trades.extend([
+                    res.trade
+                    for res in execution_results
+                    if res.trade is not None
+                ]
+            )
 
-            signal = self._strategy.on_candle(candle)
-            order_intent = self._create_order_intent(candle.timestamp, signal)
-            records.append(self._create_record(candle, signal))
+            signal = self._strategy.on_frame(frame)
+            order_intents = self._create_order_intents(frame.timestamp, signal)
+            records.append(self._create_record(frame, signal))
 
         return BacktestResult(
-            symbol=self._symbol,
+            allocation=self._allocation,
             initial_cash=self._initial_cash,
             records=records,
             trades=trades,
-            order_executions=order_executions
+            order_executions=order_executions_total
         )
 
-    def _execute_pending_order(self, order: Order, candle: Candle) -> OrderExecutionResult:
+    def _execute_pending_orders(self, orders: Sequence[Order], frame: MarketFrame) -> Sequence[OrderExecutionResult]:
         """Execute a pending order at the current candle open.
 
         Returns the broker's OrderExecutionResult. Insufficient cash or
         position is captured in its status instead of stopping the backtest.
         """
-        return self._broker.execute(
-            order=order,
-            prices={self._symbol: candle.open},
-            timestamp=candle.timestamp
-        )
+        prices = frame.open_prices()
+        return [
+            self._broker.execute(
+                order=order,
+                prices=prices,
+                timestamp=frame.timestamp
+            )
+            for order in orders
+        ]
 
-    def _create_order(self, intent: OrderIntent, candle: Candle) -> Order | None:
+    def _create_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
         """Convert a buy or sell signal into an execution-time order.
 
         The quantity is calculated from the portfolio state immediately before
@@ -123,46 +127,66 @@ class BacktestEngine:
         signal timestamp and uses the current candle as its submission
         timestamp.
         """
-        return self._resolver.resolve(
-            intent=intent,
-            context=self._create_context(candle.timestamp, candle.open)
-        )
+        context_by_symbol = self._create_context_by_symbol(frame)
 
-    def _create_order_intent(self, timestamp: datetime, signal: Signal) -> OrderIntent | None:
-        if signal == Signal.BUY or signal == Signal.SELL:
-            side = side_from_signal(signal)
+        return [
+            order for intent in intents
+            if (
+                order := self._resolver.resolve(
+                    intent=intent,
+                    context=context_by_symbol[intent.symbol]
+                )
+            ) is not None
+        ]
 
-            return OrderIntent(
-                symbol=self._symbol,
-                timestamp=timestamp,
-                side=side,
-                sizing_instruction=self._plan.instruction_for(side)
-            )
 
-        elif signal != Signal.HOLD:
-            raise ValueError("Not a valid signal")
+    def _create_order_intents(self, timestamp: datetime, multi_asset_signal: MultiAssetSignal) -> Sequence[OrderIntent]:
+        intents = []
 
-        return None
+        for symbol, signal in multi_asset_signal.signals.items():
 
-    def _create_record(self, candle: Candle, signal: Signal) -> BacktestRecord:
+            if signal == Signal.BUY or signal == Signal.SELL:
+
+                side = side_from_signal(signal)
+                _, plan = self._allocation.allocations[symbol]
+
+                intents.append(OrderIntent(
+                    symbol=symbol,
+                    timestamp=timestamp,
+                    side=side,
+                    sizing_instruction=plan.instruction_for(side)
+                ))
+
+            elif signal != Signal.HOLD:
+                raise ValueError("Not a valid signal")
+
+        return intents
+
+    def _create_record(self, frame: MarketFrame, signal: MultiAssetSignal) -> BacktestRecord:
         """Create a per-candle snapshot valued at the current close."""
         return BacktestRecord(
-            candle=candle,
+            frame=frame,
             generated_signal=signal,
-            snapshot=self._broker.portfolio.snapshot(prices={self._symbol: candle.close})
+            snapshot=self._broker.portfolio.snapshot(prices=frame.close_prices())
         )
 
-    def _create_context(self, timestamp: datetime, price: float) -> ResolutionContext:
-        current_quantity = self._broker.portfolio.position_quantity(self._symbol)
-        cash = self._broker.portfolio.cash
-
-        return ResolutionContext(
-            timestamp=timestamp,
-            reference_price=price,
-            cash=cash,
-            current_quantity=current_quantity,
-            portfolio_value=cash + current_quantity * price
+    def _create_context_by_symbol(self, frame: MarketFrame) -> dict[str, ResolutionContext]:
+        usable_cash_by_symbol = self._broker.portfolio.usable_cash_per_symbol(
+            self._allocation
         )
+        timestamp = frame.timestamp
+        value = self._broker.portfolio.value(frame.open_prices())
+
+        return {
+            symbol: ResolutionContext(
+                timestamp=timestamp,
+                reference_price=candle.open,
+                usable_cash=usable_cash_by_symbol[symbol],
+                current_quantity=self._broker.portfolio.position_quantity(symbol),
+                portfolio_value=value,
+            )
+            for symbol, candle in frame.candles.items()
+        }
 
 
 def side_from_signal(signal: Signal) -> Side:

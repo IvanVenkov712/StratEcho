@@ -83,7 +83,7 @@ def drawdown_series(
             drawdowns.append(0.0)
         else:
             drawdowns.append(v / curr_max - 1)
-        timestamps.append(r.candle.timestamp)
+        timestamps.append(r.frame.timestamp)
 
     return timestamps, drawdowns
 
@@ -146,5 +146,5 @@ def signal_marker_series(
 
     return (
         [record.timestamp for record in matching_records],
-        [record.candle.close for record in matching_records],
+        [record.frame.close for record in matching_records],
     )

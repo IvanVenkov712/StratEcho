@@ -211,7 +211,7 @@ def _run_backtest_with_candles(
     return BacktestEngine(
         strategy=strategy,
         broker=broker,
-        plan=sizing_plan,
+        allocation=sizing_plan,
         resolver=factories.create_order_resolver(
             execution_model=execution_model,
             commission_model=commission_model,

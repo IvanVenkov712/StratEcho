@@ -87,7 +87,7 @@ def plot_markers(
 def plot_close_prices(axes: Axes, result: BacktestResult) -> None:
     """Plot the closing price from every chronological backtest record."""
     transformer = lambda backtest_result: close_price_series(
-        [record.candle for record in backtest_result.records]
+        [record.frame for record in backtest_result.records]
     )
 
     plot_series(axes, result, transformer, label="Close prices", color="tab:cyan")
