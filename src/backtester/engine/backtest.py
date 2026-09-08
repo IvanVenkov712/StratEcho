@@ -47,7 +47,6 @@ class BacktestEngine:
                 orders using execution costs and the next candle's opening
                 portfolio snapshot.
             data: Chronologically ordered candles used by the simulation.
-            symbol: Asset symbol traded by this engine.
         """
 
         validated_data = tuple(data)
@@ -104,22 +103,6 @@ class BacktestEngine:
             order_executions=order_executions_total
         )
 
-    def _execute_pending_orders(self, orders: Sequence[Order], frame: MarketFrame) -> Sequence[OrderExecutionResult]:
-        """Execute a pending order at the current candle open.
-
-        Returns the broker's OrderExecutionResult. Insufficient cash or
-        position is captured in its status instead of stopping the backtest.
-        """
-        prices = frame.open_prices()
-        return [
-            self._broker.execute(
-                order=order,
-                prices=prices,
-                timestamp=frame.timestamp
-            )
-            for order in orders
-        ]
-
     def _execute_pending_order(self, order: Order, frame: MarketFrame) -> OrderExecutionResult:
         prices = frame.open_prices()
         return self._broker.execute(
@@ -157,18 +140,6 @@ class BacktestEngine:
 
         return exec_results, trades
 
-    def _create_sell_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
-        return self._create_orders(
-            [intent for intent in intents if intent.side is Side.SELL],
-            frame
-        )
-
-    def _create_buy_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
-        return self._create_orders(
-            [intent for intent in intents if intent.side is Side.BUY],
-            frame
-        )
-
     def _create_order(self, intent: OrderIntent, frame: MarketFrame) -> Order | None:
         context = self._create_order_resolution_context(frame)
 
@@ -176,27 +147,6 @@ class BacktestEngine:
             intent=intent,
             context=context
         )
-
-    def _create_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
-        """Convert a buy or sell signal into an execution-time order.
-
-        The quantity is calculated from the portfolio state immediately before
-        execution and the current candle's open. The simulation uses that same
-        opening reference price for execution. The order retains the intent's
-        signal timestamp and uses the current candle as its submission
-        timestamp.
-        """
-        context = self._create_order_resolution_context(frame)
-
-        return [
-            order for intent in intents
-            if (
-                order := self._resolver.resolve(
-                    intent=intent,
-                    context=context
-                )
-            ) is not None
-        ]
 
 
     def _create_order_intents(self, timestamp: datetime, multi_asset_signal: MultiAssetSignal) -> Sequence[OrderIntent]:
