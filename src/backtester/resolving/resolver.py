@@ -190,7 +190,7 @@ class OrderResolver:
         Return ``None`` when the resolved quantity is not positive.
         """
         usable_cash = context.snapshot.cash * context.allocation.allocations[intent.symbol]
-        current_quantity = context.snapshot.positions[intent.symbol]
+        current_quantity = context.snapshot.positions.get(intent.symbol, 0)
 
         quantity_context = QuantityResolutionContext(
             usable_cash=usable_cash,
