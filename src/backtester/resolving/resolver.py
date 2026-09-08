@@ -189,15 +189,7 @@ class OrderResolver:
 
         Return ``None`` when the resolved quantity is not positive.
         """
-        usable_cash = context.snapshot.cash * context.allocation.allocations[intent.symbol]
-        current_quantity = context.snapshot.positions.get(intent.symbol, 0)
-
-        quantity_context = QuantityResolutionContext(
-            usable_cash=usable_cash,
-            current_quantity=current_quantity,
-            portfolio_value=context.snapshot.value,
-            reference_price=context.reference_prices[intent.symbol]
-        )
+        quantity_context = _create_quantity_context(intent, context)
 
         quantity = self._q_resolver.resolve_quantity(intent.side, intent.sizing_instruction, quantity_context)
 
@@ -211,3 +203,26 @@ class OrderResolver:
             submitted_timestamp=context.timestamp,
             quantity=quantity
         )
+
+def _create_quantity_context(intent: OrderIntent, context: OrderResolutionContext) -> QuantityResolutionContext:
+    symbol = intent.symbol
+    reference_price = context.reference_prices[symbol]
+    current_quantity = context.snapshot.positions.get(symbol, 0)
+    weight = context.allocation.allocations[symbol]
+
+    target_holding_value = context.snapshot.value * weight
+    current_holding_value = current_quantity * reference_price
+
+    desired_purchase_value = max(
+        0.0,
+        target_holding_value - current_holding_value,
+    )
+
+    usable_cash = min(context.snapshot.cash, desired_purchase_value)
+
+    return QuantityResolutionContext(
+        usable_cash=usable_cash,
+        current_quantity=current_quantity,
+        portfolio_value=context.snapshot.value,
+        reference_price=reference_price,
+    )
