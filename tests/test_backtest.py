@@ -6,7 +6,7 @@ import pytest
 
 from backtester.domain.market import Candle
 from backtester.engine.backtest import BacktestEngine
-from backtester.resolving.resolver import OrderResolver, ResolutionContext
+from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.policy import SizingPlan
 from backtester.domain.trading import (
     Order,
@@ -104,7 +104,7 @@ def make_resolver_mock(*quantities: int) -> Mock:
     else:
         pending_quantities = iter(configured_quantities)
 
-    def resolve(intent: OrderIntent, context: ResolutionContext) -> Order | None:
+    def resolve(intent: OrderIntent, context: OrderResolutionContext) -> Order | None:
         quantity = (
             configured_quantities[0]
             if pending_quantities is None
@@ -263,7 +263,7 @@ def test_pending_intent_sizes_order_from_portfolio_and_next_open() -> None:
             timestamp=candles[0].timestamp,
             sizing_instruction=ALL_IN_INSTRUCTION,
         ),
-        context=ResolutionContext(
+        context=OrderResolutionContext(
             timestamp=candles[1].timestamp,
             usable_cash=1_000,
             current_quantity=4,

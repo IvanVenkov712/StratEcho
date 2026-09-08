@@ -24,7 +24,7 @@ from backtester.execution.costs import (
     NoCommissionModel,
     ProportionalCommissionModel,
 )
-from backtester.resolving.resolver import ResolutionContext
+from backtester.resolving.resolver import OrderResolutionContext
 from backtester.sizing.policy import SizingPlan
 
 @pytest.mark.parametrize(
@@ -191,7 +191,7 @@ def test_create_order_resolver_composes_cost_capper_and_cash_buffer() -> None:
         commission_model=NoCommissionModel(),
         buffer_rate=args.buffer_rate,
     )
-    context = ResolutionContext(
+    context = OrderResolutionContext(
         timestamp=datetime(2024, 1, 2),
         usable_cash=1_000,
         current_quantity=10,

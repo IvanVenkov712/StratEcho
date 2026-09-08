@@ -9,7 +9,7 @@ from backtester.resolving.resolver import (
     BuyQuantityCapper,
     OrderResolver,
     QuantityResolver,
-    ResolutionContext,
+    OrderResolutionContext,
 )
 from backtester.domain.trading import Side, SizingMode, SizingInstruction, Order, OrderIntent
 
@@ -22,8 +22,8 @@ def make_context(
     cash: float = 1_000.0,
     current_quantity: int = 10,
     portfolio_value: float = 2_000.0,
-) -> ResolutionContext:
-    return ResolutionContext(
+) -> OrderResolutionContext:
+    return OrderResolutionContext(
         timestamp=TIMESTAMP,
         reference_price=reference_price,
         usable_cash=cash,
@@ -62,7 +62,7 @@ def instruction(mode: SizingMode, value: int | float | None) -> SizingInstructio
 def test_resolution_context_stores_the_portfolio_snapshot() -> None:
     context = make_context()
 
-    assert context == ResolutionContext(
+    assert context == OrderResolutionContext(
         timestamp=TIMESTAMP,
         reference_price=100.0,
         usable_cash=1_000.0,

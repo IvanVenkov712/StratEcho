@@ -5,7 +5,7 @@ from backtester.sizing.policy import SizingPlan
 
 @dataclass(frozen=True)
 class AssetAllocation:
-    allocations: dict[str, tuple[float, SizingPlan]]
+    allocations: dict[str, float]
 
     def __post_init__(self):
         if any(weight < 0 or weight > 1 or not isfinite(weight) for weight, _ in self.allocations.values()):

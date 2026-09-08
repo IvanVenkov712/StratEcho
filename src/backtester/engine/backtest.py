@@ -8,8 +8,9 @@ from backtester.domain.market import MarketFrame
 from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult, MultiAssetSignal
 from backtester.engine.backtest_result import BacktestResult, BacktestRecord
 from backtester.execution.broker import Broker
-from backtester.resolving.resolver import OrderResolver, ResolutionContext
+from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.asset_allocation import AssetAllocation
+from backtester.sizing.policy import MultiAssetSizingPlan
 from backtester.strategies.multi_asset.base import MultiAssetStrategy
 
 
@@ -28,6 +29,7 @@ class BacktestEngine:
             strategy: MultiAssetStrategy,
             broker: Broker,
             allocation: AssetAllocation,
+            sizing: MultiAssetSizingPlan,
             resolver: OrderResolver,
             data: Sequence[MarketFrame],
     ):
@@ -54,6 +56,7 @@ class BacktestEngine:
         self._strategy: MultiAssetStrategy = strategy
         self._broker = broker
         self._allocation = allocation
+        self._sizing = sizing
         self._resolver = resolver
         self._data = validated_data
         self._initial_cash = broker.portfolio.cash
@@ -127,14 +130,14 @@ class BacktestEngine:
         signal timestamp and uses the current candle as its submission
         timestamp.
         """
-        context_by_symbol = self._create_context_by_symbol(frame)
+        context = self._create_order_resolution_context(frame)
 
         return [
             order for intent in intents
             if (
                 order := self._resolver.resolve(
                     intent=intent,
-                    context=context_by_symbol[intent.symbol]
+                    context=context
                 )
             ) is not None
         ]
@@ -148,7 +151,7 @@ class BacktestEngine:
             if signal == Signal.BUY or signal == Signal.SELL:
 
                 side = side_from_signal(signal)
-                _, plan = self._allocation.allocations[symbol]
+                plan = self._sizing.plans[symbol]
 
                 intents.append(OrderIntent(
                     symbol=symbol,
@@ -170,24 +173,15 @@ class BacktestEngine:
             snapshot=self._broker.portfolio.snapshot(prices=frame.close_prices())
         )
 
-    def _create_context_by_symbol(self, frame: MarketFrame) -> dict[str, ResolutionContext]:
-        usable_cash_by_symbol = self._broker.portfolio.usable_cash_per_symbol(
-            self._allocation
+    def _create_order_resolution_context(self, frame: MarketFrame) -> OrderResolutionContext:
+        reference_prices = frame.open_prices()
+
+        return OrderResolutionContext(
+            timestamp=frame.timestamp,
+            reference_prices=reference_prices,
+            snapshot=self._broker.portfolio.snapshot(reference_prices),
+            allocation=self._allocation
         )
-        timestamp = frame.timestamp
-        value = self._broker.portfolio.value(frame.open_prices())
-
-        return {
-            symbol: ResolutionContext(
-                timestamp=timestamp,
-                reference_price=candle.open,
-                usable_cash=usable_cash_by_symbol[symbol],
-                current_quantity=self._broker.portfolio.position_quantity(symbol),
-                portfolio_value=value,
-            )
-            for symbol, candle in frame.candles.items()
-        }
-
 
 def side_from_signal(signal: Signal) -> Side:
     """Map a buy or sell signal to its corresponding order side."""
