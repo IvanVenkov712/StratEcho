@@ -20,6 +20,13 @@ class OrderResolutionContext:
 
 @dataclass(frozen=True)
 class QuantityResolutionContext:
+    """Sizing inputs for one symbol at execution time.
+
+    ``usable_cash`` is the cash-limited allocation gap available for a buy,
+    not the portfolio's entire cash balance. ``portfolio_value`` includes
+    cash and all holdings valued at the execution reference prices.
+    """
+
     reference_price: float
     usable_cash: float
     current_quantity: int
@@ -78,10 +85,15 @@ class BuyQuantityCapper:
 class QuantityResolver:
     """Resolve sizing instructions against an execution-time portfolio state.
 
-    All-in, percent, and up-to buys are capped by estimated execution costs.
-    Fixed buys retain their requested quantity and may therefore be rejected by
-    the broker when unaffordable. Sell quantities never exceed the current
-    position except in fixed mode, where the broker performs that validation.
+    All-in buys use the available allocation-gap budget; percent buys use a
+    fraction of that budget, and up-to buys additionally limit share quantity.
+    Affordability includes estimated slippage and commission. Fixed buys return
+    the requested quantity only when it fits the budget, otherwise ``-1``;
+    OrderResolver then skips the intent without a recorded broker rejection.
+
+    Percent sells use a fraction of owned shares, rounded down. Sell quantities
+    never exceed the current position except in fixed mode, where the broker
+    performs that validation. Allocation weights do not limit sell quantities.
     """
 
     def __init__(self, capper: BuyQuantityCapper):
@@ -153,7 +165,12 @@ class QuantityResolver:
 
 
 class BufferQuantityResolver(QuantityResolver):
-    """Cap requested buys so a configured fraction of cash remains reserved."""
+    """Apply an additional cap of ``usable_cash * (1 - buffer_rate)`` to buys.
+
+    The buffer applies to each order's allocation-gap budget, not a separately
+    reserved pool of portfolio cash. It may reduce an otherwise affordable
+    fixed buy. Sells and non-positive resolved quantities pass through.
+    """
 
     def __init__(self, resolver: QuantityResolver, capper: BuyQuantityCapper, buffer_rate: float):
         if not 0 <= buffer_rate < 1:
@@ -187,7 +204,9 @@ class OrderResolver:
     def resolve(self, intent: OrderIntent, context: OrderResolutionContext) -> Order | None:
         """Resolve ``intent`` while preserving signal and submission times.
 
-        Return ``None`` when the resolved quantity is not positive.
+        Return ``None`` when the resolved quantity is not positive, including
+        fixed buys that exceed the available allocation-gap budget. These
+        intents never reach the broker and produce no order execution result.
         """
         quantity_context = _create_quantity_context(intent, context)
 
@@ -205,6 +224,21 @@ class OrderResolver:
         )
 
 def _create_quantity_context(intent: OrderIntent, context: OrderResolutionContext) -> QuantityResolutionContext:
+    """Calculate the cash-limited gap to a symbol's target holding value.
+
+    The buy budget is min(cash, max(0, equity * weight - holding_value)),
+    using the execution-time snapshot and reference price. Percentage buys
+    consume a fraction of this budget, not a fraction of total cash or equity.
+
+    For example, equity of 1,000, a weight of 0.5, holdings worth 400, and
+    cash of 600 give a budget of 100. A 50% buy has a cost budget of 50,
+    including commission and slippage, subject to whole-share rounding.
+
+    Weights do not reserve cash, generate orders, or automatically rebalance.
+    Holdings above their target have a zero buy budget but are not sold unless
+    the strategy requests a sale. Sell sizing uses owned shares independently
+    of the calculated buy budget.
+    """
     symbol = intent.symbol
     reference_price = context.reference_prices[symbol]
     current_quantity = context.snapshot.positions.get(symbol, 0)

@@ -15,13 +15,15 @@ from backtester.strategies.multi_asset.base import MultiAssetStrategy
 
 
 class BacktestEngine:
-    """Run a single-symbol backtest with explicit next-candle execution.
+    """Run a multi-asset backtest with next-frame-open execution.
 
-    The engine feeds the strategy only the candles available up to the current
-    point in time. A signal generated from candle T creates an order intent.
-    At candle T+1 open, the position sizer uses the current portfolio and opening
-    price to determine the order quantity immediately before execution. This
-    keeps signal generation separate from execution and avoids look-ahead bias.
+    Signals generated from frame T create intents for frame T+1 open. Pending
+    sells precede buys; within each side, lower priority values execute first,
+    with symbol order breaking ties. Each intent is sized from a fresh opening
+    portfolio snapshot, including the effects of earlier fills in that frame.
+
+    The strategy receives the current frame only after pending execution.
+    Allocation weights constrain buy sizing without generating rebalance orders.
     """
 
     def __init__(
@@ -34,19 +36,22 @@ class BacktestEngine:
             priority: Callable[[str], int],
             data: Sequence[MarketFrame],
     ):
-        """Create a backtest engine for one strategy, broker, data set, and symbol.
+        """Create a backtest engine for one strategy and a shared portfolio.
 
         Args:
-            strategy: Trading strategy that converts available candle history
-                into a buy, sell, or hold signal.
+            strategy: Trading strategy that processes chronological market
+                frames and produces per-symbol buy, sell, or hold signals.
             broker: Broker responsible for order execution and portfolio
                 accounting.
-            allocation: Buy and sell sizing instructions attached to generated order
-                intents.
+            allocation: Per-symbol fractions of total equity used as buy-sizing
+                targets, without automatic rebalancing or cash reservation.
+            sizing: Per-symbol buy and sell instructions attached to intents.
             resolver: Component that converts pending intents into whole-share
-                orders using execution costs and the next candle's opening
+                orders using execution costs and the next frame's opening
                 portfolio snapshot.
-            data: Chronologically ordered candles used by the simulation.
+            priority: Symbol ranking within each order side; lower values execute
+                first, with lexicographic symbol order breaking ties.
+            data: Chronologically ordered market frames used by the simulation.
         """
 
         validated_data = tuple(data)
@@ -70,13 +75,11 @@ class BacktestEngine:
         return self._results
 
     def _calculate_results(self) -> BacktestResult:
-        """Iterate through candles, execute pending orders, and record results.
+        """Execute pending intents at each frame's open, then generate signals.
 
-        For each candle, an intent created by the previous candle's signal is
-        sized from the current portfolio and executed first at the current open.
-        The current candle is then added to the strategy's available history, a
-        new signal is generated, and the portfolio is valued at the current
-        close.
+        After execution, the strategy observes the current frame and the
+        portfolio is recorded at closing prices. Signals from the final frame
+        remain unexecuted because there is no following execution frame.
         """
         order_executions_total = []
         trades_total = []
@@ -116,11 +119,21 @@ class BacktestEngine:
         intents: Sequence[OrderIntent],
         frame: MarketFrame
     ) -> tuple[Sequence[OrderExecutionResult], Sequence[Trade]]:
+        """Resolve and execute intents sequentially at this frame's open.
 
-        def intent_key(intent: OrderIntent) -> tuple[int, int]:
+        Sort by sells before buys, ascending priority, then symbol. Refresh the
+        opening snapshot before every resolution: sale proceeds can fund later
+        buys, and earlier fills change cash, holdings, and equity after costs.
+        Consequently, later allocation budgets can depend on execution order.
+
+        Only orders submitted to the broker produce execution results. Intents
+        skipped by the resolver, including unaffordable fixed buys, are omitted.
+        """
+
+        def intent_key(intent: OrderIntent) -> tuple[int, int, str]:
             first = 0 if intent.side == Side.SELL else 1
             second = self._priority(intent.symbol)
-            return first, second
+            return first, second, intent.symbol
 
         sorted_intents = sorted(
             intents,
@@ -180,6 +193,7 @@ class BacktestEngine:
         )
 
     def _create_order_resolution_context(self, frame: MarketFrame) -> OrderResolutionContext:
+        """Value the current portfolio at frame opens after any earlier fills."""
         reference_prices = frame.open_prices()
 
         return OrderResolutionContext(

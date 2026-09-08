@@ -87,7 +87,7 @@ class Portfolio:
     def usable_cash_per_symbol(self, allocation: AssetAllocation) -> dict[str, float]:
         return {
             symbol: self.cash * weight
-            for symbol, (weight, _) in allocation.allocations.items()
+            for symbol, weight in allocation.allocations.items()
         }
 
     @staticmethod
