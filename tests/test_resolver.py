@@ -10,25 +10,47 @@ from backtester.resolving.resolver import (
     OrderResolver,
     QuantityResolver,
     OrderResolutionContext,
+    QuantityResolutionContext,
 )
-from backtester.domain.trading import Side, SizingMode, SizingInstruction, Order, OrderIntent
+from backtester.domain.trading import (
+    Side, SizingMode, SizingInstruction, Order, OrderIntent, PortfolioSnapshot,
+)
+from backtester.sizing.asset_allocation import AssetAllocation
 
 TIMESTAMP = datetime(2024, 1, 2, 9, 30)
 
 
-def make_context(
+def make_quantity_context(
     *,
     reference_price: float = 100.0,
-    cash: float = 1_000.0,
+    usable_cash: float = 1_000.0,
     current_quantity: int = 10,
     portfolio_value: float = 2_000.0,
+) -> QuantityResolutionContext:
+    return QuantityResolutionContext(
+        reference_price=reference_price,
+        usable_cash=usable_cash,
+        current_quantity=current_quantity,
+        portfolio_value=portfolio_value,
+    )
+
+
+def make_order_context(
+    *,
+    cash: float = 1_000.0,
+    positions: dict[str, int] | None = None,
+    portfolio_value: float = 2_000.0,
+    weight: float = 1.0,
 ) -> OrderResolutionContext:
     return OrderResolutionContext(
         timestamp=TIMESTAMP,
-        reference_price=reference_price,
-        usable_cash=cash,
-        current_quantity=current_quantity,
-        portfolio_value=portfolio_value,
+        reference_prices={"AAPL": 100.0, "MSFT": 50.0},
+        snapshot=PortfolioSnapshot(
+            cash=cash,
+            value=portfolio_value,
+            positions={"AAPL": 10} if positions is None else positions,
+        ),
+        allocation=AssetAllocation({"AAPL": weight, "MSFT": 1.0 - weight}),
     )
 
 
@@ -59,11 +81,10 @@ def instruction(mode: SizingMode, value: int | float | None) -> SizingInstructio
     return SizingInstruction(mode=mode, value=value)
 
 
-def test_resolution_context_stores_the_portfolio_snapshot() -> None:
-    context = make_context()
+def test_quantity_context_stores_symbol_sizing_inputs() -> None:
+    context = make_quantity_context()
 
-    assert context == OrderResolutionContext(
-        timestamp=TIMESTAMP,
+    assert context == QuantityResolutionContext(
         reference_price=100.0,
         usable_cash=1_000.0,
         current_quantity=10,
@@ -137,6 +158,21 @@ def test_buy_quantity_capper_accounts_for_execution_costs() -> None:
     assert quantity == 9
 
 
+@pytest.mark.parametrize(
+    ("budget", "expected_quantity"), [(510, 5), (505, 4), (100, 0)],
+)
+def test_buy_quantity_capper_includes_fee_at_allocation_budget_boundary(
+    budget: float, expected_quantity: int,
+) -> None:
+    cost_calculator = Mock(spec=ExecutionCostCalculator)
+    # No slippage; each order pays a flat fee of 10.
+    cost_calculator.estimate_buy_cost.side_effect = (
+        lambda quantity, reference_price: quantity * reference_price + 10
+    )
+
+    assert BuyQuantityCapper(cost_calculator).cap(budget, 100) == expected_quantity
+
+
 def test_buy_quantity_capper_respects_max_quantity() -> None:
     cost_calculator = Mock(spec=ExecutionCostCalculator)
     cost_calculator.estimate_buy_cost.side_effect = (
@@ -173,10 +209,10 @@ def test_buy_quantity_capper_returns_zero_when_one_unit_is_unaffordable() -> Non
     assert quantity == 0
 
 
-def test_all_in_buy_uses_cash_as_the_affordability_budget() -> None:
+def test_all_in_buy_uses_allocation_headroom_as_the_affordability_budget() -> None:
     resolver, capper = make_quantity_resolver(capped_quantity=9)
     sizing_instruction = instruction(SizingMode.ALL_IN, None)
-    context = make_context(cash=1_000.0, reference_price=100.0)
+    context = make_quantity_context(usable_cash=1_000.0, reference_price=100.0)
 
     quantity = resolver.resolve_quantity(
         Side.BUY,
@@ -194,7 +230,7 @@ def test_all_in_buy_preserves_zero_result_from_capper() -> None:
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.ALL_IN, None),
-        make_context(cash=100.0, reference_price=100.0),
+        make_quantity_context(usable_cash=100.0, reference_price=100.0),
     )
 
     assert quantity == 0
@@ -223,7 +259,7 @@ def test_buffer_quantity_resolver_accepts_zero_as_an_integer() -> None:
         buffer_rate=0,
     )
     sizing_instruction = instruction(SizingMode.ALL_IN, None)
-    context = make_context(cash=1_000.0, reference_price=100.0)
+    context = make_quantity_context(usable_cash=1_000.0, reference_price=100.0)
 
     quantity = resolver.resolve_quantity(
         Side.BUY,
@@ -254,7 +290,7 @@ def test_all_in_buy_passes_buffered_cash_to_capper() -> None:
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.ALL_IN, None),
-        make_context(cash=1_000.0, reference_price=60.0),
+        make_quantity_context(usable_cash=1_000.0, reference_price=60.0),
     )
 
     assert quantity == 12
@@ -265,13 +301,13 @@ def test_all_in_buy_passes_buffered_cash_to_capper() -> None:
     )
 
 
-def test_percent_buy_uses_the_requested_fraction_of_available_cash() -> None:
+def test_percent_buy_uses_the_requested_fraction_of_allocation_headroom() -> None:
     resolver, capper = make_quantity_resolver(capped_quantity=4)
 
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.PERCENT, 0.5),
-        make_context(cash=1_000.0, reference_price=120.0),
+        make_quantity_context(usable_cash=1_000.0, reference_price=120.0),
     )
 
     assert quantity == 4
@@ -296,7 +332,7 @@ def test_percent_buy_passes_buffer_budget_and_requested_quantity_to_capper(
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.PERCENT, percent),
-        make_context(cash=1_000.0, reference_price=60.0),
+        make_quantity_context(usable_cash=1_000.0, reference_price=60.0),
     )
 
     assert quantity == expected_quantity
@@ -313,7 +349,7 @@ def test_up_to_buy_passes_requested_max_quantity_to_capper() -> None:
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.UP_TO, 3),
-        make_context(cash=1_000.0, reference_price=100.0),
+        make_quantity_context(usable_cash=1_000.0, reference_price=100.0),
     )
 
     assert quantity == 3
@@ -326,24 +362,31 @@ def test_up_to_buy_uses_available_cash_as_the_affordability_budget() -> None:
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.UP_TO, 20),
-        make_context(cash=450.0, reference_price=100.0),
+        make_quantity_context(usable_cash=450.0, reference_price=100.0),
     )
 
     assert quantity == 4
     capper.cap.assert_called_once_with(450.0, 100.0, 20)
 
 
-def test_fixed_buy_returns_the_requested_quantity_without_affordability_capping() -> None:
-    resolver, capper = make_quantity_resolver()
+@pytest.mark.parametrize(
+    ("affordable_quantity", "expected_quantity"),
+    [(12, 12), (11, -1), (0, -1)],
+    ids=["exact-budget", "over-budget", "no-budget"],
+)
+def test_fixed_buy_requires_the_entire_quantity_to_be_affordable(
+    affordable_quantity: int, expected_quantity: int,
+) -> None:
+    resolver, capper = make_quantity_resolver(capped_quantity=affordable_quantity)
 
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.FIXED, 12),
-        make_context(cash=100.0, reference_price=100.0),
+        make_quantity_context(usable_cash=1_200.0, reference_price=100.0),
     )
 
-    assert quantity == 12
-    capper.cap.assert_not_called()
+    assert quantity == expected_quantity
+    capper.cap.assert_called_once_with(1_200.0, 100.0)
 
 
 def test_fixed_buy_is_capped_against_the_buffered_budget() -> None:
@@ -356,7 +399,7 @@ def test_fixed_buy_is_capped_against_the_buffered_budget() -> None:
     quantity = resolver.resolve_quantity(
         Side.BUY,
         instruction(SizingMode.FIXED, 20),
-        make_context(cash=1_000.0, reference_price=60.0),
+        make_quantity_context(usable_cash=1_000.0, reference_price=60.0),
     )
 
     assert quantity == 12
@@ -386,7 +429,7 @@ def test_sell_quantity_resolves_each_sizing_mode(
     quantity = resolver.resolve_quantity(
         Side.SELL,
         sizing_instruction,
-        make_context(current_quantity=10),
+        make_quantity_context(current_quantity=10),
     )
 
     assert quantity == expected_quantity
@@ -400,7 +443,7 @@ def test_resolve_quantity_rejects_unknown_side() -> None:
         resolver.resolve_quantity(  # type: ignore[arg-type]
             "buy",
             instruction(SizingMode.ALL_IN, None),
-            make_context(),
+            make_quantity_context(),
         )
 
     capper.cap.assert_not_called()
@@ -413,7 +456,7 @@ def test_resolve_quantity_rejects_unknown_sizing_mode(side: Side) -> None:
     invalid_instruction.mode = "invalid"
 
     with pytest.raises(ValueError, match="Invalid sizing instruction"):
-        resolver.resolve_quantity(side, invalid_instruction, make_context())
+        resolver.resolve_quantity(side, invalid_instruction, make_quantity_context())
 
     capper.cap.assert_not_called()
 
@@ -429,7 +472,7 @@ def test_order_resolver_builds_an_order_from_the_resolved_quantity() -> None:
         timestamp=TIMESTAMP - timedelta(days=1),
         sizing_instruction=sizing_instruction,
     )
-    context = make_context()
+    context = make_order_context()
 
     order = resolver.resolve(intent, context)
 
@@ -443,7 +486,7 @@ def test_order_resolver_builds_an_order_from_the_resolved_quantity() -> None:
     quantity_resolver.resolve_quantity.assert_called_once_with(
         Side.BUY,
         sizing_instruction,
-        context,
+        make_quantity_context(),
     )
 
 
@@ -459,6 +502,71 @@ def test_order_resolver_returns_none_for_non_positive_quantity(quantity: int) ->
         sizing_instruction=instruction(SizingMode.ALL_IN, None),
     )
 
-    order = resolver.resolve(intent, make_context(current_quantity=0))
+    order = resolver.resolve(
+        intent, make_order_context(positions={}, portfolio_value=1_000),
+    )
 
     assert order is None
+
+
+@pytest.mark.parametrize(
+    ("cash", "positions", "equity", "weight", "expected_budget"),
+    [
+        pytest.param(1_000, {}, 1_000, 0.5, 500, id="unowned-symbol"),
+        pytest.param(510, {"MSFT": 5}, 1_010, 0.5, 505, id="equity-after-fee"),
+        pytest.param(600, {"AAPL": 4}, 1_000, 0.5, 100, id="existing-holdings"),
+        pytest.param(600, {"MSFT": 8}, 1_000, 0.5, 500, id="other-asset-equity"),
+        pytest.param(100, {"MSFT": 18}, 1_000, 0.5, 100, id="cash-limited"),
+        pytest.param(400, {"AAPL": 6}, 1_000, 0.5, 0, id="over-target"),
+        pytest.param(500, {"AAPL": 5}, 1_000, 0.5, 0, id="at-target"),
+        pytest.param(1_000, {}, 1_000, 0.0, 0, id="zero-weight"),
+    ],
+)
+def test_order_resolver_passes_cash_limited_allocation_headroom_to_quantity_resolver(
+    cash: float,
+    positions: dict[str, int],
+    equity: float,
+    weight: float,
+    expected_budget: float,
+) -> None:
+    quantity_resolver = Mock(spec=QuantityResolver)
+    quantity_resolver.resolve_quantity.return_value = 0
+    resolver = OrderResolver(quantity_resolver)
+    sizing_instruction = instruction(SizingMode.ALL_IN, None)
+    intent = OrderIntent("AAPL", Side.BUY, TIMESTAMP, sizing_instruction)
+    context = make_order_context(
+        cash=cash, positions=positions, portfolio_value=equity, weight=weight,
+    )
+
+    assert resolver.resolve(intent, context) is None
+
+    quantity_resolver.resolve_quantity.assert_called_once_with(
+        Side.BUY,
+        sizing_instruction,
+        QuantityResolutionContext(
+            reference_price=100,
+            usable_cash=expected_budget,
+            current_quantity=positions.get("AAPL", 0),
+            portfolio_value=equity,
+        ),
+    )
+
+
+def test_order_resolver_preserves_sell_holdings_with_zero_allocation_weight() -> None:
+    quantity_resolver = Mock(spec=QuantityResolver)
+    quantity_resolver.resolve_quantity.return_value = 4
+    resolver = OrderResolver(quantity_resolver)
+    sizing_instruction = instruction(SizingMode.ALL_IN, None)
+    intent = OrderIntent("AAPL", Side.SELL, TIMESTAMP, sizing_instruction)
+    context = make_order_context(
+        cash=600, positions={"AAPL": 4}, portfolio_value=1_000, weight=0,
+    )
+
+    order = resolver.resolve(intent, context)
+
+    assert order == Order("AAPL", Side.SELL, 4, TIMESTAMP, TIMESTAMP)
+    quantity_resolver.resolve_quantity.assert_called_once_with(
+        Side.SELL,
+        sizing_instruction,
+        QuantityResolutionContext(100, 0, 4, 1_000),
+    )

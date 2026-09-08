@@ -4,11 +4,13 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from backtester.domain.market import Candle
+from backtester.domain.market import Candle, MarketFrame
 from backtester.engine.backtest import BacktestEngine
 from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
-from backtester.sizing.policy import SizingPlan
+from backtester.sizing.asset_allocation import AssetAllocation
+from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.domain.trading import (
+    MultiAssetSignal,
     Order,
     OrderIntent,
     Side,
@@ -20,8 +22,12 @@ from backtester.domain.trading import (
     OrderExecutionResult,
     OrderExecutionStatus,
 )
-from backtester.strategies.base import SingleAssetStrategy
+from backtester.strategies.multi_asset.base import MultiAssetStrategy
 
+
+BUY_SIGNAL = MultiAssetSignal({"AAPL": Signal.BUY})
+SELL_SIGNAL = MultiAssetSignal({"AAPL": Signal.SELL})
+HOLD_SIGNAL = MultiAssetSignal({"AAPL": Signal.HOLD})
 
 ALL_IN_INSTRUCTION = SizingInstruction(mode=SizingMode.ALL_IN, value=None)
 DEFAULT_SIZING_PLAN = SizingPlan(
@@ -45,7 +51,7 @@ def make_portfolio_mock(
         return PortfolioSnapshot(
             cash=portfolio.cash,
             value=portfolio.value(prices),
-            positions={},
+            positions={"AAPL": portfolio.position_quantity.return_value},
         )
 
     portfolio.snapshot.side_effect = snapshot
@@ -125,81 +131,82 @@ def make_resolver_mock(*quantities: int) -> Mock:
     return resolver
 
 
-def make_candles(prices: Sequence[tuple[float, float]]) -> list[Candle]:
+def make_frames(prices: Sequence[tuple[float, float]]) -> list[MarketFrame]:
     start = datetime(2026, 1, 1)
-    candles = []
+    frames = []
 
     for index, (open_price, close_price) in enumerate(prices):
-        candles.append(
-            Candle(
-                timestamp=start + timedelta(days=index),
-                open=open_price,
-                high=max(open_price, close_price),
-                low=min(open_price, close_price),
-                close=close_price,
-                volume=1_000,
-            )
+        timestamp = start + timedelta(days=index)
+        candle = Candle(
+            timestamp=timestamp,
+            open=open_price,
+            high=max(open_price, close_price),
+            low=min(open_price, close_price),
+            close=close_price,
+            volume=1_000,
         )
+        frames.append(MarketFrame(timestamp, {"AAPL": candle}))
 
-    return candles
+    return frames
 
 
 def make_engine(
-    signals: Sequence[Signal],
-    candles: Sequence[Candle],
+    signals: Sequence[MultiAssetSignal],
+    frames: Sequence[MarketFrame],
     broker: Mock | None = None,
     resolver: Mock | None = None,
     plan: SizingPlan = DEFAULT_SIZING_PLAN,
 ) -> tuple[BacktestEngine, Mock, Mock]:
-    strategy = Mock(spec=SingleAssetStrategy)
-    strategy.on_candle.side_effect = list(signals)
+    strategy = Mock(spec=MultiAssetStrategy)
+    strategy.on_frame.side_effect = list(signals)
     broker = broker or make_broker_mock()
     resolver = resolver or make_resolver_mock()
     engine = BacktestEngine(
         strategy=strategy,
         broker=broker,
-        allocation=plan,
+        allocation=AssetAllocation({"AAPL": 1.0}),
+        sizing=MultiAssetSizingPlan({"AAPL": plan}),
+        priority=Mock(return_value=0),
         resolver=resolver,
-        data=candles,
-        symbol="AAPL",
+        data=frames,
     )
 
     return engine, strategy, broker
 
 
 def test_empty_data_produces_empty_result_without_calling_strategy() -> None:
-    engine, strategy, broker = make_engine([Signal.BUY], candles=[])
+    engine, strategy, broker = make_engine([BUY_SIGNAL], frames=[])
 
     result = engine.run()
 
     assert result.records == []
     assert result.order_executions == []
     assert result.trades == []
-    assert result.symbol == "AAPL"
+    assert result.allocation == AssetAllocation({"AAPL": 1.0})
     assert result.initial_cash == 1_000
-    strategy.on_candle.assert_not_called()
+    strategy.on_frame.assert_not_called()
     broker.execute.assert_not_called()
 
 
-def test_engine_rejects_candles_that_are_not_chronological() -> None:
-    candles = make_candles([(10, 10), (11, 11)])
-    candles.reverse()
+def test_engine_rejects_frames_that_are_not_chronological() -> None:
+    frames = make_frames([(10, 10), (11, 11)])
+    frames.reverse()
 
     with pytest.raises(ValueError, match="strictly increasing"):
-        make_engine([Signal.HOLD, Signal.HOLD], candles)
+        make_engine([HOLD_SIGNAL, HOLD_SIGNAL], frames)
 
 
 def test_hold_strategy_creates_records_without_orders_or_trades() -> None:
-    candles = make_candles([(10, 10), (11, 11), (12, 12)])
-    engine, _, broker = make_engine([Signal.HOLD, Signal.HOLD, Signal.HOLD], candles)
+    frames = make_frames([(10, 10), (11, 11), (12, 12)])
+    engine, _, broker = make_engine([HOLD_SIGNAL, HOLD_SIGNAL, HOLD_SIGNAL], frames)
 
     result = engine.run()
 
     assert len(result.records) == 3
     assert [record.generated_signal for record in result.records] == [
-        Signal.HOLD,
-        Signal.HOLD,
-        Signal.HOLD,
+        HOLD_SIGNAL,
+        HOLD_SIGNAL,
+        HOLD_SIGNAL,
     ]
     assert result.order_executions == []
     assert result.trades == []
@@ -207,11 +214,11 @@ def test_hold_strategy_creates_records_without_orders_or_trades() -> None:
 
 
 def test_buy_signal_creates_no_order_when_resolver_returns_none() -> None:
-    candles = make_candles([(100, 100), (90, 90)])
+    frames = make_frames([(100, 100), (90, 90)])
     broker = make_broker_mock(make_portfolio_mock(cash=99))
     resolver = make_resolver_mock(0)
     engine, _, broker = make_engine(
-        [Signal.BUY, Signal.HOLD], candles, broker, resolver
+        [BUY_SIGNAL, HOLD_SIGNAL], frames, broker, resolver
     )
 
     result = engine.run()
@@ -221,9 +228,9 @@ def test_buy_signal_creates_no_order_when_resolver_returns_none() -> None:
     broker.execute.assert_not_called()
 
 
-def test_buy_signal_is_executed_on_next_candle_open() -> None:
-    candles = make_candles([(100, 100), (90, 95)])
-    engine, _, broker = make_engine([Signal.BUY, Signal.HOLD], candles)
+def test_buy_signal_is_executed_on_next_frame_open() -> None:
+    frames = make_frames([(100, 100), (90, 95)])
+    engine, _, broker = make_engine([BUY_SIGNAL, HOLD_SIGNAL], frames)
 
     result = engine.run()
 
@@ -233,25 +240,30 @@ def test_buy_signal_is_executed_on_next_candle_open() -> None:
         symbol="AAPL",
         side=Side.BUY,
         quantity=10,
-        signal_timestamp=candles[0].timestamp,
-        submitted_timestamp=candles[1].timestamp,
+        signal_timestamp=frames[0].timestamp,
+        submitted_timestamp=frames[1].timestamp,
     )
     broker.execute.assert_called_once_with(
         order=result.order_executions[0].order,
         prices={"AAPL": 90},
-        timestamp=candles[1].timestamp,
+        timestamp=frames[1].timestamp,
     )
     assert result.trades == [result.order_executions[0].trade]
 
 
 def test_pending_intent_sizes_order_from_portfolio_and_next_open() -> None:
-    candles = make_candles([(50, 60), (70, 75)])
+    frames = make_frames([(50, 60), (70, 75)])
     broker = make_broker_mock(
         make_portfolio_mock(cash=1_000, position_quantity=4)
     )
+    broker.portfolio.snapshot.side_effect = [
+        PortfolioSnapshot(1_000, 1_240, {"AAPL": 4}),  # First close: 4 * 60.
+        PortfolioSnapshot(1_000, 1_280, {"AAPL": 4}),  # Next open: 4 * 70.
+        PortfolioSnapshot(789, 1_314, {"AAPL": 7}),  # Buy 3 at 70, fee 1; close 75.
+    ]
     resolver = make_resolver_mock(3)
     engine, _, _ = make_engine(
-        [Signal.BUY, Signal.HOLD], candles, broker, resolver
+        [BUY_SIGNAL, HOLD_SIGNAL], frames, broker, resolver
     )
 
     engine.run()
@@ -260,22 +272,21 @@ def test_pending_intent_sizes_order_from_portfolio_and_next_open() -> None:
         intent=OrderIntent(
             symbol="AAPL",
             side=Side.BUY,
-            timestamp=candles[0].timestamp,
+            timestamp=frames[0].timestamp,
             sizing_instruction=ALL_IN_INSTRUCTION,
         ),
         context=OrderResolutionContext(
-            timestamp=candles[1].timestamp,
-            usable_cash=1_000,
-            current_quantity=4,
-            portfolio_value=1_280,
-            reference_price=70,
+            timestamp=frames[1].timestamp,
+            reference_prices={"AAPL": 70},
+            snapshot=PortfolioSnapshot(1_000, 1_280, {"AAPL": 4}),
+            allocation=AssetAllocation({"AAPL": 1.0}),
         ),
     )
 
 
-def test_buy_signal_on_last_candle_is_not_executed() -> None:
-    candles = make_candles([(100, 100)])
-    engine, _, broker = make_engine([Signal.BUY], candles)
+def test_buy_signal_on_last_frame_is_not_executed() -> None:
+    frames = make_frames([(100, 100)])
+    engine, _, broker = make_engine([BUY_SIGNAL], frames)
 
     result = engine.run()
 
@@ -285,10 +296,10 @@ def test_buy_signal_on_last_candle_is_not_executed() -> None:
 
 
 def test_sell_signal_creates_no_order_when_resolver_returns_none() -> None:
-    candles = make_candles([(20, 20), (25, 25)])
+    frames = make_frames([(20, 20), (25, 25)])
     resolver = make_resolver_mock(0)
     engine, _, broker = make_engine(
-        [Signal.SELL, Signal.HOLD], candles, resolver=resolver
+        [SELL_SIGNAL, HOLD_SIGNAL], frames, resolver=resolver
     )
 
     result = engine.run()
@@ -298,12 +309,12 @@ def test_sell_signal_creates_no_order_when_resolver_returns_none() -> None:
     broker.execute.assert_not_called()
 
 
-def test_sell_signal_is_executed_on_next_candle_open() -> None:
-    candles = make_candles([(20, 20), (25, 30)])
+def test_sell_signal_is_executed_on_next_frame_open() -> None:
+    frames = make_frames([(20, 20), (25, 30)])
     broker = make_broker_mock(make_portfolio_mock(cash=100, position_quantity=5))
     resolver = make_resolver_mock(5)
     engine, _, broker = make_engine(
-        [Signal.SELL, Signal.HOLD], candles, broker, resolver
+        [SELL_SIGNAL, HOLD_SIGNAL], frames, broker, resolver
     )
 
     result = engine.run()
@@ -314,23 +325,23 @@ def test_sell_signal_is_executed_on_next_candle_open() -> None:
         symbol="AAPL",
         side=Side.SELL,
         quantity=5,
-        signal_timestamp=candles[0].timestamp,
-        submitted_timestamp=candles[1].timestamp,
+        signal_timestamp=frames[0].timestamp,
+        submitted_timestamp=frames[1].timestamp,
     )
     broker.execute.assert_called_once_with(
         order=result.order_executions[0].order,
         prices={"AAPL": 25},
-        timestamp=candles[1].timestamp,
+        timestamp=frames[1].timestamp,
     )
 
 
 def test_failed_pending_order_is_recorded_without_trade() -> None:
-    candles = make_candles([(10, 10), (20, 20)])
+    frames = make_frames([(10, 10), (20, 20)])
     broker = make_broker_mock(
         make_portfolio_mock(cash=100),
         rejection_statuses=[OrderExecutionStatus.INSUFFICIENT_FUNDS],
     )
-    engine, _, broker = make_engine([Signal.BUY, Signal.HOLD], candles, broker)
+    engine, _, broker = make_engine([BUY_SIGNAL, HOLD_SIGNAL], frames, broker)
 
     result = engine.run()
 
@@ -341,15 +352,15 @@ def test_failed_pending_order_is_recorded_without_trade() -> None:
     assert broker.execute.call_count == 1
 
 
-def test_failed_pending_order_does_not_stop_current_candle_signal() -> None:
-    candles = make_candles([(10, 10), (20, 50), (10, 10)])
+def test_failed_pending_order_does_not_stop_current_frame_signal() -> None:
+    frames = make_frames([(10, 10), (20, 50), (10, 10)])
     broker = make_broker_mock(
         make_portfolio_mock(cash=100),
         rejection_statuses=[OrderExecutionStatus.INSUFFICIENT_FUNDS],
     )
     engine, _, broker = make_engine(
-        [Signal.BUY, Signal.BUY, Signal.HOLD],
-        candles,
+        [BUY_SIGNAL, BUY_SIGNAL, HOLD_SIGNAL],
+        frames,
         broker,
         make_resolver_mock(10, 2),
     )
@@ -368,15 +379,15 @@ def test_failed_pending_order_does_not_stop_current_candle_signal() -> None:
             "AAPL",
             Side.BUY,
             quantity=10,
-            signal_timestamp=candles[0].timestamp,
-            submitted_timestamp=candles[1].timestamp,
+            signal_timestamp=frames[0].timestamp,
+            submitted_timestamp=frames[1].timestamp,
         ),
         Order(
             "AAPL",
             Side.BUY,
             quantity=2,
-            signal_timestamp=candles[1].timestamp,
-            submitted_timestamp=candles[2].timestamp,
+            signal_timestamp=frames[1].timestamp,
+            submitted_timestamp=frames[2].timestamp,
         ),
     ]
     assert result.trades == [
@@ -386,14 +397,14 @@ def test_failed_pending_order_does_not_stop_current_candle_signal() -> None:
             quantity=2,
             fill_price=10,
             commission=1.0,
-            timestamp=candles[2].timestamp,
+            timestamp=frames[2].timestamp,
         )
     ]
 
 
 def test_run_is_idempotent_and_does_not_execute_trades_twice() -> None:
-    candles = make_candles([(100, 100), (90, 95)])
-    engine, _, broker = make_engine([Signal.BUY, Signal.HOLD], candles)
+    frames = make_frames([(100, 100), (90, 95)])
+    engine, _, broker = make_engine([BUY_SIGNAL, HOLD_SIGNAL], frames)
 
     first_result = engine.run()
     second_result = engine.run()
@@ -404,7 +415,7 @@ def test_run_is_idempotent_and_does_not_execute_trades_twice() -> None:
 
 
 def test_record_after_pending_order_uses_current_portfolio_snapshot_at_close() -> None:
-    candles = make_candles([(100, 100), (80, 120)])
+    frames = make_frames([(100, 100), (80, 120)])
     portfolio = make_portfolio_mock(cash=1_000, value_at_close=1_000)
 
     def mark_execution_visible_in_next_record(
@@ -412,30 +423,34 @@ def test_record_after_pending_order_uses_current_portfolio_snapshot_at_close() -
         _prices: Mapping[str, float],
         _timestamp: datetime,
     ) -> None:
-        portfolio.cash = 200
-        portfolio.value.return_value = 1_400
+        portfolio.cash = 199  # Buy 10 at 80, plus the mock broker's fee of 1.
+        portfolio.position_quantity.return_value = 10
+        portfolio.value.return_value = 1_399
 
     broker = make_broker_mock(
         portfolio,
         on_execute=mark_execution_visible_in_next_record,
     )
-    engine, _, _ = make_engine([Signal.BUY, Signal.HOLD], candles, broker)
+    engine, _, _ = make_engine([BUY_SIGNAL, HOLD_SIGNAL], frames, broker)
 
     result = engine.run()
 
-    assert result.records[0].frame is candles[0]
+    assert result.records[0].frame is frames[0]
     assert result.records[0].snapshot.value == 1_000
     assert result.records[0].snapshot.cash == 1_000
-    assert result.records[1].frame is candles[1]
-    assert result.records[1].snapshot.value == 1_400
-    assert result.records[1].snapshot.cash == 200
-    portfolio.snapshot.assert_has_calls(
-        [call(prices={"AAPL": 100}), call(prices={"AAPL": 120})]
-    )
+    assert result.records[1].frame is frames[1]
+    assert result.records[1].snapshot.value == 1_399
+    assert result.records[1].snapshot.cash == 199
+    assert result.records[1].snapshot.positions == {"AAPL": 10}
+    assert portfolio.snapshot.call_args_list == [
+        call(prices={"AAPL": 100}),
+        call({"AAPL": 80}),
+        call(prices={"AAPL": 120}),
+    ]
 
 
-def test_pending_order_executes_before_current_candle_signal_is_generated() -> None:
-    candles = make_candles([(100, 100), (90, 95), (110, 110)])
+def test_pending_order_executes_before_current_frame_signal_is_generated() -> None:
+    frames = make_frames([(100, 100), (90, 95), (110, 110)])
     portfolio = make_portfolio_mock(cash=1_000, position_quantity=0)
 
     def expose_position_after_buy(
@@ -448,8 +463,8 @@ def test_pending_order_executes_before_current_candle_signal_is_generated() -> N
 
     broker = make_broker_mock(portfolio, on_execute=expose_position_after_buy)
     engine, _, broker = make_engine(
-        [Signal.BUY, Signal.SELL, Signal.HOLD],
-        candles,
+        [BUY_SIGNAL, SELL_SIGNAL, HOLD_SIGNAL],
+        frames,
         broker,
     )
 
@@ -463,34 +478,34 @@ def test_pending_order_executes_before_current_candle_signal_is_generated() -> N
             "AAPL",
             Side.BUY,
             quantity=10,
-            signal_timestamp=candles[0].timestamp,
-            submitted_timestamp=candles[1].timestamp,
+            signal_timestamp=frames[0].timestamp,
+            submitted_timestamp=frames[1].timestamp,
         ),
         Order(
             "AAPL",
             Side.SELL,
             quantity=10,
-            signal_timestamp=candles[1].timestamp,
-            submitted_timestamp=candles[2].timestamp,
+            signal_timestamp=frames[1].timestamp,
+            submitted_timestamp=frames[2].timestamp,
         ),
     ]
     assert result.order_executions[1].status is OrderExecutionStatus.SUCCESS
 
 
-def test_strategy_receives_each_candle_in_chronological_order() -> None:
-    candles = make_candles([(10, 10), (11, 11), (12, 12)])
+def test_strategy_receives_each_frame_in_chronological_order() -> None:
+    frames = make_frames([(10, 10), (11, 11), (12, 12)])
     engine, strategy, _ = make_engine(
-        [Signal.HOLD, Signal.HOLD, Signal.HOLD],
-        candles,
+        [HOLD_SIGNAL, HOLD_SIGNAL, HOLD_SIGNAL],
+        frames,
     )
 
     engine.run()
 
-    assert strategy.on_candle.call_args_list == [call(candle) for candle in candles]
+    assert strategy.on_frame.call_args_list == [call(frame) for frame in frames]
 
 
 def test_buy_hold_sell_sequence_emits_expected_pending_orders() -> None:
-    candles = make_candles([(100, 100), (90, 100), (110, 110), (130, 130)])
+    frames = make_frames([(100, 100), (90, 100), (110, 110), (130, 130)])
     portfolio = make_portfolio_mock(cash=1_000, position_quantity=0)
 
     def expose_position_after_buy(
@@ -503,8 +518,8 @@ def test_buy_hold_sell_sequence_emits_expected_pending_orders() -> None:
 
     broker = make_broker_mock(portfolio, on_execute=expose_position_after_buy)
     engine, _, broker = make_engine(
-        [Signal.BUY, Signal.HOLD, Signal.SELL, Signal.HOLD],
-        candles,
+        [BUY_SIGNAL, HOLD_SIGNAL, SELL_SIGNAL, HOLD_SIGNAL],
+        frames,
         broker,
     )
 
@@ -518,15 +533,15 @@ def test_buy_hold_sell_sequence_emits_expected_pending_orders() -> None:
             "AAPL",
             Side.BUY,
             quantity=10,
-            signal_timestamp=candles[0].timestamp,
-            submitted_timestamp=candles[1].timestamp,
+            signal_timestamp=frames[0].timestamp,
+            submitted_timestamp=frames[1].timestamp,
         ),
         Order(
             "AAPL",
             Side.SELL,
             quantity=10,
-            signal_timestamp=candles[2].timestamp,
-            submitted_timestamp=candles[3].timestamp,
+            signal_timestamp=frames[2].timestamp,
+            submitted_timestamp=frames[3].timestamp,
         ),
     ]
     submitted_prices = [

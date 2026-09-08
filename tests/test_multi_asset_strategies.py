@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -100,3 +100,25 @@ def test_can_generate_signals_for_a_subset_of_the_frame() -> None:
     strategy = SimpleMultiAssetStrategy({"AAPL": child})
 
     assert strategy.on_frame(make_frame()) == MultiAssetSignal({"AAPL": Signal.BUY})
+
+
+def test_distinct_strategy_histories_can_signal_on_different_frames() -> None:
+    aapl = Mock(spec=SingleAssetStrategy)
+    msft = Mock(spec=SingleAssetStrategy)
+    aapl.on_candle.side_effect = [Signal.BUY, Signal.SELL, Signal.HOLD]
+    msft.on_candle.side_effect = [Signal.HOLD, Signal.BUY, Signal.SELL]
+    strategy = SimpleMultiAssetStrategy({"AAPL": aapl, "MSFT": msft})
+    frames = [make_frame(day=day) for day in range(3)]
+
+    assert [strategy.on_frame(frame) for frame in frames] == [
+        MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.HOLD}),
+        MultiAssetSignal({"AAPL": Signal.SELL, "MSFT": Signal.BUY}),
+        MultiAssetSignal({"AAPL": Signal.HOLD, "MSFT": Signal.SELL}),
+    ]
+    assert aapl.on_candle.call_args_list == [call(frame.candles["AAPL"]) for frame in frames]
+    assert msft.on_candle.call_args_list == [call(frame.candles["MSFT"]) for frame in frames]
+
+    strategy.reset()
+
+    aapl.reset.assert_called_once_with()
+    msft.reset.assert_called_once_with()

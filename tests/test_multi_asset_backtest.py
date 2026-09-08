@@ -1,21 +1,25 @@
 from datetime import datetime, timedelta
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
 from backtester.domain.market import Candle, MarketFrame
 from backtester.domain.trading import (
     MultiAssetSignal,
+    Order,
+    OrderExecutionResult,
+    OrderExecutionStatus,
     OrderIntent,
     PortfolioSnapshot,
     Side,
     Signal,
     SizingInstruction,
     SizingMode,
+    Trade,
 )
 from backtester.engine.backtest import BacktestEngine
 from backtester.execution.broker import Broker
-from backtester.resolving.resolver import OrderResolver
+from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.strategies.multi_asset.base import MultiAssetStrategy
@@ -141,17 +145,170 @@ def test_valid_empty_data_does_not_call_strategy(engine_args: dict) -> None:
     engine_args["strategy"].on_frame.assert_not_called()
 
 
-def test_supported_signal_reaches_resolver_at_next_frame_open(engine_args: dict) -> None:
+@pytest.mark.parametrize("symbol", SYMBOLS)
+def test_partial_signal_only_resolves_present_symbol_at_next_frame_open(
+    engine_args: dict, symbol: str,
+) -> None:
     first, second = make_frame(), make_frame(day=1)
     engine_args["data"] = [first, second]
     engine_args["strategy"].on_frame.side_effect = [
-        MultiAssetSignal({"MSFT": Signal.BUY}), MultiAssetSignal({}),
+        MultiAssetSignal({symbol: Signal.BUY}), MultiAssetSignal({}),
     ]
 
     BacktestEngine(**engine_args).run()
 
     engine_args["resolver"].resolve.assert_called_once()
     arguments = engine_args["resolver"].resolve.call_args.kwargs
-    assert arguments["intent"] == OrderIntent("MSFT", Side.BUY, first.timestamp, ALL_IN)
+    assert arguments["intent"] == OrderIntent(symbol, Side.BUY, first.timestamp, ALL_IN)
     assert arguments["context"].timestamp == second.timestamp
     assert arguments["context"].reference_prices == second.open_prices()
+
+
+def make_execution(order: Order, *, commission: float = 0) -> OrderExecutionResult:
+    """Represent a scripted fill at 100 with no slippage."""
+    return OrderExecutionResult(
+        status=OrderExecutionStatus.SUCCESS,
+        order=order,
+        trade=Trade(
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            fill_price=100,
+            commission=commission,
+            timestamp=order.submitted_timestamp,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("priorities", "expected_symbols"),
+    [
+        pytest.param({"AAPL": 1, "MSFT": 0}, ("MSFT", "AAPL"), id="msft-first"),
+        pytest.param({"AAPL": 0, "MSFT": 1}, ("AAPL", "MSFT"), id="aapl-first"),
+        pytest.param({"AAPL": 0, "MSFT": 0}, ("AAPL", "MSFT"), id="symbol-tie-break"),
+    ],
+)
+@pytest.mark.parametrize("commission", [0, 10], ids=["no-fees", "flat-fee"])
+def test_simultaneous_buys_share_refreshed_cash_and_equity_in_priority_order(
+    engine_args: dict, priorities: dict[str, int], expected_symbols: tuple[str, str],
+    commission: float,
+) -> None:
+    first, second = make_frame(), make_frame(day=1)
+    earlier, later = expected_symbols
+    engine_args["data"] = [first, second]
+    engine_args["priority"] = Mock(side_effect=priorities.__getitem__)
+    # Deliberately oppose alphabetical order in the strategy's signal mapping.
+    engine_args["strategy"].on_frame.side_effect = [
+        MultiAssetSignal({"MSFT": Signal.BUY, "AAPL": Signal.BUY}),
+        MultiAssetSignal({}),
+    ]
+    portfolio = engine_args["broker"].portfolio
+    portfolio.cash = 1_020
+    before = PortfolioSnapshot(1_020, 1_020, {})
+    # Half of 1,020 is 510: five shares cost 500 plus the optional fee.
+    after_first = PortfolioSnapshot(520 - commission, 1_020 - commission, {earlier: 5})
+    # With a 10 fee, the second target is 505; five shares plus 10 no longer fit.
+    later_quantity = 5 if commission == 0 else 4
+    final = (
+        PortfolioSnapshot(20, 1_020, {earlier: 5, later: 5})
+        if commission == 0
+        else PortfolioSnapshot(100, 1_000, {earlier: 5, later: 4})
+    )
+    portfolio.snapshot.side_effect = [before, before, after_first, final]
+    orders = [
+        Order(earlier, Side.BUY, 5, first.timestamp, second.timestamp),
+        Order(later, Side.BUY, later_quantity, first.timestamp, second.timestamp),
+    ]
+    engine_args["resolver"].resolve.side_effect = orders
+    executions = [make_execution(order, commission=commission) for order in orders]
+    engine_args["broker"].execute.side_effect = executions
+
+    result = BacktestEngine(**engine_args).run()
+
+    assert engine_args["resolver"].resolve.call_args_list == [
+        call(
+            intent=OrderIntent(symbol, Side.BUY, first.timestamp, ALL_IN),
+            context=OrderResolutionContext(
+                second.timestamp, second.open_prices(), snapshot, engine_args["allocation"],
+            ),
+        )
+        for symbol, snapshot in [(earlier, before), (later, after_first)]
+    ]
+    assert engine_args["broker"].execute.call_args_list == [
+        call(order=order, prices=second.open_prices(), timestamp=second.timestamp)
+        for order in orders
+    ]
+    assert result.order_executions == executions
+    assert result.trades == [execution.trade for execution in executions]
+    assert result.records[-1].snapshot == final
+
+
+def test_sell_funds_another_assets_buy_at_the_same_open(engine_args: dict) -> None:
+    first, second = make_frame(), make_frame(day=1)
+    engine_args["data"] = [first, second]
+    engine_args["strategy"].on_frame.side_effect = [
+        MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.SELL}),
+        MultiAssetSignal({}),
+    ]
+    # Side ordering wins even when the buy has higher priority.
+    engine_args["priority"] = Mock(side_effect={"AAPL": 0, "MSFT": 1}.__getitem__)
+    portfolio = engine_args["broker"].portfolio
+    portfolio.cash = 0
+    before = PortfolioSnapshot(0, 1_000, {"MSFT": 10})
+    after_sale = PortfolioSnapshot(1_000, 1_000, {})
+    final = PortfolioSnapshot(500, 1_000, {"AAPL": 5})
+    portfolio.snapshot.side_effect = [before, before, after_sale, final]
+    orders = [
+        Order("MSFT", Side.SELL, 10, first.timestamp, second.timestamp),
+        Order("AAPL", Side.BUY, 5, first.timestamp, second.timestamp),
+    ]
+    engine_args["resolver"].resolve.side_effect = orders
+    executions = [make_execution(order) for order in orders]
+    engine_args["broker"].execute.side_effect = executions
+    events = Mock()
+    events.attach_mock(engine_args["resolver"].resolve, "resolve")
+    events.attach_mock(engine_args["broker"].execute, "execute")
+    events.attach_mock(engine_args["strategy"].on_frame, "on_frame")
+
+    result = BacktestEngine(**engine_args).run()
+
+    assert events.mock_calls == [
+        call.on_frame(first),
+        call.resolve(
+            intent=OrderIntent("MSFT", Side.SELL, first.timestamp, ALL_IN),
+            context=OrderResolutionContext(
+                second.timestamp, second.open_prices(), before, engine_args["allocation"],
+            ),
+        ),
+        call.execute(order=orders[0], prices=second.open_prices(), timestamp=second.timestamp),
+        call.resolve(
+            intent=OrderIntent("AAPL", Side.BUY, first.timestamp, ALL_IN),
+            context=OrderResolutionContext(
+                second.timestamp, second.open_prices(), after_sale, engine_args["allocation"],
+            ),
+        ),
+        call.execute(order=orders[1], prices=second.open_prices(), timestamp=second.timestamp),
+        call.on_frame(second),
+    ]
+    assert result.order_executions == executions
+    assert result.trades == [execution.trade for execution in executions]
+    assert result.records[-1].snapshot == final
+
+
+def test_final_frame_multi_asset_signals_are_recorded_without_execution(engine_args: dict) -> None:
+    first, final = make_frame(), make_frame(day=1)
+    signal = MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.SELL})
+    engine_args["data"] = [first, final]
+    engine_args["strategy"].on_frame.side_effect = [MultiAssetSignal({}), signal]
+
+    engine = BacktestEngine(**engine_args)
+    result = engine.run()
+
+    assert engine.run() is result
+    assert result.records[-1].frame is final
+    assert result.records[-1].generated_signal == signal
+    assert result.order_executions == []
+    assert result.trades == []
+    engine_args["resolver"].resolve.assert_not_called()
+    engine_args["broker"].execute.assert_not_called()
+    assert engine_args["strategy"].on_frame.call_args_list == [call(first), call(final)]
