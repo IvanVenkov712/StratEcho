@@ -99,6 +99,19 @@ be mixed. An empty mapping or all-empty sequences returns `[]`; an empty series
 alongside a non-empty series is rejected. Different asset calendars require
 separate execution and valuation rules and are not supported here.
 
+The multi-asset engine uses allocation keys as its supported-symbol universe.
+Every frame and the sizing plan must contain exactly those symbols, including
+symbols with a zero allocation weight. Missing or extra symbols raise `ValueError`
+when the engine is constructed. Strategy signals may contain any subset of the
+universe; unsupported symbols raise `ValueError`, even for HOLD signals or on the
+final frame.
+
+`SimpleMultiAssetStrategy` requires a distinct single-asset strategy instance for
+each symbol so indicator history and other state remain independent. `SameForAll`
+calls its supplier once per symbol; the supplier must create a fresh instance.
+Reusing an instance raises `ValueError`. All required candles are checked before
+any child strategy processes a frame.
+
 ## Validation and normalization
 
 Before data reaches the engine, Strat Echo requires:

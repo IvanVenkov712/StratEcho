@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Sequence, Callable
 
-from backtester.data.validation import validate_frames_chronological
+from backtester.data.validation import validate_frames_chronological, validate_symbols
 from backtester.domain.market import MarketFrame
 from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult, MultiAssetSignal, Trade
 from backtester.engine.backtest_result import BacktestResult, BacktestRecord
@@ -24,6 +24,8 @@ class BacktestEngine:
 
     The strategy receives the current frame only after pending execution.
     Allocation weights constrain buy sizing without generating rebalance orders.
+    Allocation keys define the supported symbols. Every frame and the sizing
+    plan must contain exactly those symbols; signals may contain a subset.
     """
 
     def __init__(
@@ -56,8 +58,15 @@ class BacktestEngine:
 
         validated_data = tuple(data)
         validate_frames_chronological(validated_data)
+        supported_symbols = frozenset(allocation.allocations)
+        validate_symbols(sizing.plans, supported_symbols, source="Sizing plan")
+        for frame in validated_data:
+            validate_symbols(
+                frame.candles, supported_symbols, source=f"Frame at {frame.timestamp}"
+            )
 
         self._results = None
+        self._supported_symbols = supported_symbols
         self._strategy: MultiAssetStrategy = strategy
         self._broker = broker
         self._allocation = allocation
@@ -163,6 +172,12 @@ class BacktestEngine:
 
 
     def _create_order_intents(self, timestamp: datetime, multi_asset_signal: MultiAssetSignal) -> Sequence[OrderIntent]:
+        validate_symbols(
+            multi_asset_signal.signals,
+            self._supported_symbols,
+            source=f"Strategy signal at {timestamp}",
+            require_all=False,
+        )
         intents = []
 
         for symbol, signal in multi_asset_signal.signals.items():
