@@ -75,6 +75,30 @@ candle. Both end-anchored modes start `--years` calendar years before their
 exclusive end boundary. Explicit date boundaries follow the common resolution
 rules documented in the [CLI reference](cli.md#common-options).
 
+## Combining assets into market frames
+
+Use `market_frames_from_candles` to combine already loaded candle sequences
+into the chronological `MarketFrame` sequence accepted by the multi-asset engine:
+
+```python
+from backtester.data.frames import market_frames_from_candles
+
+frames = market_frames_from_candles({"AAPL": aapl_candles, "MSFT": msft_candles})
+```
+
+Every symbol must have the same strictly increasing timestamp sequence. The
+function raises `ValueError` for duplicate or unordered timestamps, missing
+bars, extra bars, or different timestamps, including different start/end dates.
+It does not sort, fill, or discard bars to force alignment. Each frame retains
+the original candle for every supplied symbol.
+
+Dates absent from all assets, such as shared market holidays, are allowed;
+the function does not infer a trading calendar or expected bar frequency.
+Timezone-aware timestamps compare by instant; naive and aware timestamps cannot
+be mixed. An empty mapping or all-empty sequences returns `[]`; an empty series
+alongside a non-empty series is rejected. Different asset calendars require
+separate execution and valuation rules and are not supported here.
+
 ## Validation and normalization
 
 Before data reaches the engine, Strat Echo requires:
