@@ -5,7 +5,7 @@ from typing import Sequence
 
 from backtester.data.validation import validate_frames_chronological
 from backtester.domain.market import MarketFrame
-from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult, MultiAssetSignal
+from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult, MultiAssetSignal, Trade
 from backtester.engine.backtest_result import BacktestResult, BacktestRecord
 from backtester.execution.broker import Broker
 from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
@@ -78,20 +78,23 @@ class BacktestEngine:
         close.
         """
         order_executions_total = []
-        trades = []
+        trades_total = []
         records = []
         order_intents = []
 
         for frame in self._data:
-            orders = self._create_orders(order_intents, frame)
-            execution_results = self._execute_pending_orders(orders, frame)
-            order_executions_total.extend(execution_results)
-            trades.extend([
-                    res.trade
-                    for res in execution_results
-                    if res.trade is not None
-                ]
+
+            exec_results, trades = self._order_execution_results(
+                self._create_sell_orders(order_intents, frame), frame
             )
+            order_executions_total.extend(exec_results)
+            trades_total.extend(trades)
+
+            exec_results, trades = self._order_execution_results(
+                self._create_buy_orders(order_intents, frame), frame
+            )
+            order_executions_total.extend(exec_results)
+            trades_total.extend(trades)
 
             signal = self._strategy.on_frame(frame)
             order_intents = self._create_order_intents(frame.timestamp, signal)
@@ -101,7 +104,7 @@ class BacktestEngine:
             allocation=self._allocation,
             initial_cash=self._initial_cash,
             records=records,
-            trades=trades,
+            trades=trades_total,
             order_executions=order_executions_total
         )
 
@@ -120,6 +123,33 @@ class BacktestEngine:
             )
             for order in orders
         ]
+
+    def _order_execution_results(
+        self,
+        orders: Sequence[Order],
+        frame: MarketFrame
+    ) -> tuple[Sequence[OrderExecutionResult], Sequence[Trade]]:
+
+        execution_results = self._execute_pending_orders(orders, frame)
+        trades = ([
+                res.trade
+                for res in execution_results
+                if res.trade is not None
+            ]
+        )
+        return execution_results, trades
+
+    def _create_sell_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
+        return self._create_orders(
+            [intent for intent in intents if intent.side is Side.SELL],
+            frame
+        )
+
+    def _create_buy_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
+        return self._create_orders(
+            [intent for intent in intents if intent.side is Side.BUY],
+            frame
+        )
 
     def _create_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
         """Convert a buy or sell signal into an execution-time order.
