@@ -1,7 +1,7 @@
 """Chronological backtest orchestration with next-candle-open execution."""
 
 from datetime import datetime
-from typing import Sequence
+from typing import Sequence, Callable
 
 from backtester.data.validation import validate_frames_chronological
 from backtester.domain.market import MarketFrame
@@ -31,6 +31,7 @@ class BacktestEngine:
             allocation: AssetAllocation,
             sizing: MultiAssetSizingPlan,
             resolver: OrderResolver,
+            priority: Callable[[str], int],
             data: Sequence[MarketFrame],
     ):
         """Create a backtest engine for one strategy, broker, data set, and symbol.
@@ -58,6 +59,7 @@ class BacktestEngine:
         self._allocation = allocation
         self._sizing = sizing
         self._resolver = resolver
+        self._priority = priority
         self._data = validated_data
         self._initial_cash = broker.portfolio.cash
 
@@ -85,13 +87,7 @@ class BacktestEngine:
         for frame in self._data:
 
             exec_results, trades = self._order_execution_results(
-                self._create_sell_orders(order_intents, frame), frame
-            )
-            order_executions_total.extend(exec_results)
-            trades_total.extend(trades)
-
-            exec_results, trades = self._order_execution_results(
-                self._create_buy_orders(order_intents, frame), frame
+                order_intents, frame
             )
             order_executions_total.extend(exec_results)
             trades_total.extend(trades)
@@ -124,20 +120,42 @@ class BacktestEngine:
             for order in orders
         ]
 
+    def _execute_pending_order(self, order: Order, frame: MarketFrame) -> OrderExecutionResult:
+        prices = frame.open_prices()
+        return self._broker.execute(
+            order=order,
+            prices=prices,
+            timestamp=frame.timestamp
+        )
+
     def _order_execution_results(
         self,
-        orders: Sequence[Order],
+        intents: Sequence[OrderIntent],
         frame: MarketFrame
     ) -> tuple[Sequence[OrderExecutionResult], Sequence[Trade]]:
 
-        execution_results = self._execute_pending_orders(orders, frame)
-        trades = ([
-                res.trade
-                for res in execution_results
-                if res.trade is not None
-            ]
+        def intent_key(intent: OrderIntent) -> tuple[int, int]:
+            first = 0 if intent.side == Side.SELL else 1
+            second = self._priority(intent.symbol)
+            return first, second
+
+        sorted_intents = sorted(
+            intents,
+            key=intent_key
         )
-        return execution_results, trades
+
+        trades = []
+        exec_results = []
+
+        for intent in sorted_intents:
+            order = self._create_order(intent, frame)
+            if order is not None:
+                exec_result = self._execute_pending_order(order, frame)
+                exec_results.append(exec_result)
+                if exec_result.trade is not None:
+                    trades.append(exec_result.trade)
+
+        return exec_results, trades
 
     def _create_sell_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
         return self._create_orders(
@@ -149,6 +167,14 @@ class BacktestEngine:
         return self._create_orders(
             [intent for intent in intents if intent.side is Side.BUY],
             frame
+        )
+
+    def _create_order(self, intent: OrderIntent, frame: MarketFrame) -> Order | None:
+        context = self._create_order_resolution_context(frame)
+
+        return self._resolver.resolve(
+            intent=intent,
+            context=context
         )
 
     def _create_orders(self, intents: Sequence[OrderIntent], frame: MarketFrame) -> Sequence[Order]:
