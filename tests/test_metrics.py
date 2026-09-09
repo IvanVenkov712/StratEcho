@@ -3,8 +3,9 @@ from math import isclose, sqrt
 
 import pytest
 
-from backtester.domain.market import Candle
-from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade
+from backtester.domain.market import Candle, MarketFrame
+from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade, MultiAssetSignal
+from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.engine.backtest_result import BacktestRecord, BacktestResult
 from backtester.metrics.metrics import (
     MetricData,
@@ -25,15 +26,15 @@ from backtester.metrics.metrics import (
 def make_record(timestamp: datetime, portfolio_value: float) -> BacktestRecord:
     candle_price = 100.0
     return BacktestRecord(
-        frame=Candle(
+        frame=MarketFrame(timestamp, {"AAPL": Candle(
             timestamp=timestamp,
             open=candle_price,
             high=candle_price,
             low=candle_price,
             close=candle_price,
             volume=1_000,
-        ),
-        generated_signal=Signal.HOLD,
+        )}),
+        generated_signal=MultiAssetSignal({"AAPL": Signal.HOLD}),
         snapshot=PortfolioSnapshot(
             cash=portfolio_value,
             value=portfolio_value,
@@ -54,7 +55,7 @@ def make_result(
     ]
 
     return BacktestResult(
-        symbol="AAPL",
+        allocation=AssetAllocation({"AAPL": 1.0}),
         initial_cash=values[0] if values else 0.0,
         records=records,
         trades=trades or [],
@@ -84,7 +85,7 @@ def test_annualized_return_uses_elapsed_calendar_days() -> None:
         start=datetime(2026, 1, 1),
     )
     result = BacktestResult(
-        symbol=result.symbol,
+        allocation=result.allocation,
         initial_cash=result.initial_cash,
         records=[
             result.records[0],
