@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 
-from backtester.data.loader import CSVDataSource, DataSource, YFinanceDataSource
+import pandas as pd
+
+from backtester.data.loader import CSVDataSource, DataSource, YFinanceDataSource, normalize_column_names
 from backtester.domain.trading import SizingInstruction, SizingMode
 from backtester.execution.costs import (
     CommissionModel,
@@ -32,8 +34,9 @@ from backtester.resolving.resolver import (
     OrderResolver,
     QuantityResolver,
 )
-from backtester.sizing.policy import SizingPlan
+from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.strategies.base import SingleAssetStrategy
+from backtester.strategies.multi_asset.simple_multi_asset import SimpleMultiAssetStrategy
 from backtester.strategies.breakout import DonchianBreakoutStrategy
 from backtester.strategies.buy_n_hold import BuyAndHoldStrategy
 from backtester.strategies.moving_average import (
@@ -125,6 +128,26 @@ def create_strategy(name: str, args: argparse.Namespace) -> SingleAssetStrategy:
     raise ValueError(f"Unknown strategy: {name}.")
 
 
+def create_multi_asset_strategy(name: str, args: argparse.Namespace) -> SimpleMultiAssetStrategy:
+    """Give each symbol a fresh strategy with the shared parameter values."""
+    return SimpleMultiAssetStrategy({
+        symbol: create_strategy(name, args) for symbol in args.symbols
+    })
+
+
+def create_multi_asset_sizing_plan(
+    args: argparse.Namespace, *, benchmark: bool = False,
+) -> MultiAssetSizingPlan:
+    """Build each symbol's effective sizing, or all-in/all-out for a benchmark."""
+    return MultiAssetSizingPlan({
+        symbol: (
+            create_all_in_all_out_sizing_plan() if benchmark
+            else create_sizing_plan(args.sizing_by_symbol[symbol])
+        )
+        for symbol in args.symbols
+    })
+
+
 def create_sizing_plan(args: argparse.Namespace) -> SizingPlan:
     """Create buy and sell sizing instructions from parsed CLI parameters."""
     if args.sizing == "all-in-all-out":
@@ -204,6 +227,13 @@ def create_data_source(args: argparse.Namespace) -> DataSource:
     if args.source == "yfinance":
         return YFinanceDataSource()
     if args.source == "csv":
+        if len(args.symbols) > 1 and args.csv_path.is_file():
+            columns = normalize_column_names(pd.read_csv(args.csv_path, nrows=0)).columns
+            if "symbol" not in columns:
+                raise ValueError(
+                    "A multi-symbol CSV file must contain a symbol column; "
+                    "alternatively use a directory with SYMBOL.csv files."
+                )
         return CSVDataSource(args.csv_path)
 
     raise ValueError(f"Unknown data source: {args.source}.")
