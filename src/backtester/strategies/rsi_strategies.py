@@ -8,54 +8,6 @@ from backtester.strategies.base import SingleAssetStrategy
 from backtester.strategies.calculators import RSICalculator, CutlerRSICalculator, ExponentialRSICalculator, \
     WilderRSICalculator
 
-
-# class RSICalculator(ABC):
-#     @abstractmethod
-#     def calculate_rsi(self, curr_price: float) -> float:
-#         pass
-#
-#     @abstractmethod
-#     def reset(self):
-#         pass
-#
-# class SimpleRSICalculator(RSICalculator):
-#     def __init__(self, n: int):
-#         if n <= 0:
-#             raise ValueError("Expected positive integer")
-#
-#         self._n = n
-#         self._prices: list[float] = []
-#
-#     def calculate_rsi(self, curr_price: float) -> float:
-#         self._prices.append(curr_price)
-#         return calculate_simple_rsi(self._n, self._prices)
-#
-#     def reset(self):
-#         self._prices.clear()
-#
-#
-# def calculate_simple_rsi(n: int, prices: Sequence[float]) -> float:
-#     """Calculate RSI from simple average gains and losses over ``n`` changes."""
-#
-#     deltas = [
-#         curr - prev for
-#         prev, curr in zip(prices[-n - 1:], prices[-n:])
-#     ]
-#
-#     avg_gain = sum(max(delta, 0) for delta in deltas) / n
-#     avg_loss = sum(max(-delta, 0) for delta in deltas) / n
-#
-#     if isclose(avg_loss, 0):
-#         if isclose(avg_gain, 0):
-#             return 50
-#         return 100
-#
-#     rs = avg_gain / avg_loss
-#
-#     rsi = 100 - (100 / (1 + rs))
-#
-#     return rsi
-
 class RSIStrategy(SingleAssetStrategy):
     """Buy below the lower RSI threshold and sell above the upper threshold."""
 
