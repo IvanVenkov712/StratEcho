@@ -14,6 +14,7 @@ from backtester.cli.factories import (
 )
 from backtester.domain.trading import (
     OrderIntent,
+    PortfolioSnapshot,
     Side,
     SizingInstruction,
     SizingMode,
@@ -26,6 +27,7 @@ from backtester.execution.costs import (
 )
 from backtester.resolving.resolver import OrderResolutionContext
 from backtester.sizing.policy import SizingPlan
+from backtester.sizing.asset_allocation import AssetAllocation
 
 @pytest.mark.parametrize(
     ("arguments", "constructor_name", "expected_arguments"),
@@ -193,10 +195,9 @@ def test_create_order_resolver_composes_cost_capper_and_cash_buffer() -> None:
     )
     context = OrderResolutionContext(
         timestamp=datetime(2024, 1, 2),
-        usable_cash=1_000,
-        current_quantity=10,
-        portfolio_value=1_600,
-        reference_price=60,
+        snapshot=PortfolioSnapshot(cash=1_000, positions={"AAPL": 10}, value=1_600),
+        reference_prices={"AAPL": 60},
+        allocation=AssetAllocation({"AAPL": 1.0}),
     )
     buy_intent = OrderIntent(
         symbol="AAPL",
