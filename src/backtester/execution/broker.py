@@ -66,11 +66,14 @@ class Broker:
         Slippage is applied to the reference price before commission and
         portfolio updates are calculated. Rejected orders do not change the
         portfolio and do not produce a trade.
+        Execution may occur at submission time or later, never before it.
         """
         if not order.symbol in prices:
             raise PriceNotFoundError
 
         _validate_timestamp(timestamp=timestamp)
+        if timestamp < order.submitted_timestamp:
+            raise ValueError("Execution timestamp cannot precede order submission.")
 
         fill_price = self._execution_model.calculate_fill_price(prices[order.symbol], order.side)
         commission = self._commission_model.calculate(order.quantity, fill_price)

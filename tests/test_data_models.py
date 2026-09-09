@@ -4,8 +4,27 @@ from math import inf
 import pytest
 
 from backtester.domain.market import Candle
+from backtester.domain.trading import MultiAssetSignal, Signal
 
 TIMESTAMP = datetime(2026, 1, 1)
+
+
+def test_multi_asset_signals_preserve_history_when_strategy_reuses_dictionary() -> None:
+    signals = {"AAPL": Signal.BUY}
+    first = MultiAssetSignal(signals)
+    signals["AAPL"] = Signal.HOLD
+    second = MultiAssetSignal(signals)
+    signals.clear()
+
+    assert first.signals == {"AAPL": Signal.BUY}
+    assert second.signals == {"AAPL": Signal.HOLD}
+
+
+def test_multi_asset_signal_mapping_cannot_be_modified() -> None:
+    signal = MultiAssetSignal({"AAPL": Signal.BUY})
+
+    with pytest.raises(TypeError):
+        signal.signals["AAPL"] = Signal.HOLD
 
 
 def make_candle(**overrides: object) -> Candle:
