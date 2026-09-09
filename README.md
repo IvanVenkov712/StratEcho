@@ -1,4 +1,12 @@
-# Strat Echo
+<p align="center">
+  <img src="assets/stratecho-logo.svg" alt="StratEcho logo" width="220">
+</p>
+
+<h1 align="center">StratEcho</h1>
+
+<p align="center">
+  A Python backtesting engine for systematic trading strategies.
+</p>
 
 Strat Echo is a Python backtesting project for experimenting with simple
 trading strategies on historical OHLCV market data. It is designed to show how
