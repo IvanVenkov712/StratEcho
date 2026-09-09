@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from typing import Callable
 
 import pandas as pd
 
@@ -77,56 +78,74 @@ def create_performance_analyzer() -> PerformanceAnalyzer:
     return analyzer
 
 
-def create_strategy(name: str, args: argparse.Namespace) -> SingleAssetStrategy:
-    """Create the named strategy from parsed CLI parameters."""
-    if name in {"moving-average", "simple-moving-average"}:
-        return SimpleMovingAverageCrossStrategy(
+STRATEGY_FACTORY_BY_NAME: dict[str, Callable[[argparse.Namespace], SingleAssetStrategy]] = {
+    "simple-moving-average":
+        lambda args: SimpleMovingAverageCrossStrategy(
             short_window_size=args.short_window,
             long_window_size=args.long_window,
-        )
-    if name == "exponential-moving-average":
-        return ExponentialMovingAverageCrossStrategy(
+        ),
+
+    "exponential-moving-average":
+        lambda args: ExponentialMovingAverageCrossStrategy(
             short_window_size=args.short_window,
             long_window_size=args.long_window,
-        )
-    if name == "buy-and-hold":
-        return BuyAndHoldStrategy()
-    if name in {"rsi", "cutler-rsi"}:
-        return CutlerRSIStrategy(
+        ),
+
+    "buy-and-hold":
+        lambda args: BuyAndHoldStrategy(),
+
+    "cutler-rsi":
+        lambda args: CutlerRSIStrategy(
             min=args.rsi_min,
             max=args.rsi_max,
             window_size=args.rsi_period,
-        )
-    if name == "exponential-rsi":
-        return ExponentialRSIStrategy(
+        ),
+
+    "exponential-rsi":
+        lambda args: ExponentialRSIStrategy(
             min=args.rsi_min,
             max=args.rsi_max,
             window_size=args.rsi_period,
-        )
-    if name == "wilder-rsi":
-        return WilderRSIStrategy(
+        ),
+
+    "wilder-rsi":
+        lambda args: WilderRSIStrategy(
             min=args.rsi_min,
             max=args.rsi_max,
             window_size=args.rsi_period,
-        )
-    if name in {"mean-reversion", "simple-mean-reversion"}:
-        return SimpleMeanReversionStrategy(
+        ),
+
+    "simple-mean-reversion":
+        lambda args: SimpleMeanReversionStrategy(
             window=args.mean_window,
             threshold=args.mean_threshold,
-        )
-    if name == "exponential-mean-reversion":
-        return ExponentialMeanReversionStrategy(
+        ),
+
+    "exponential-mean-reversion":
+        lambda args: ExponentialMeanReversionStrategy(
             window=args.mean_window,
             threshold=args.mean_threshold,
-        )
-    if name == "donchian-breakout":
-        return DonchianBreakoutStrategy(
+        ),
+
+    "donchian-breakout":
+        lambda args: DonchianBreakoutStrategy(
             entry_window=args.entry_window,
             exit_window=args.exit_window,
-        )
+        ),
+}
 
-    raise ValueError(f"Unknown strategy: {name}.")
+STRATEGY_FACTORY_BY_NAME["moving-average"] = STRATEGY_FACTORY_BY_NAME["simple-moving-average"]
+STRATEGY_FACTORY_BY_NAME["rsi"] = STRATEGY_FACTORY_BY_NAME["cutler-rsi"]
+STRATEGY_FACTORY_BY_NAME["mean-reversion"] = STRATEGY_FACTORY_BY_NAME["simple-mean-reversion"]
 
+
+def create_strategy(name: str, args: argparse.Namespace) -> SingleAssetStrategy:
+    """Create the named strategy from parsed CLI parameters."""
+    factory = STRATEGY_FACTORY_BY_NAME.get(name, None)
+    if factory is None:
+        raise ValueError(f"Unknown strategy: {name}.")
+
+    return factory(args)
 
 def create_multi_asset_strategy(name: str, args: argparse.Namespace) -> SimpleMultiAssetStrategy:
     """Give each symbol a fresh strategy with the shared parameter values."""
