@@ -85,12 +85,14 @@ def plot_markers(
 
 
 def plot_close_prices(axes: Axes, result: BacktestResult) -> None:
-    """Plot the closing price from every chronological backtest record."""
-    transformer = lambda backtest_result: close_price_series(
-        [record.frame for record in backtest_result.records]
-    )
-
-    plot_series(axes, result, transformer, label="Close prices", color="tab:cyan")
+    """Plot a separate closing-price line for each symbol."""
+    for index, symbol in enumerate(result.allocation.allocations):
+        timestamps, values = close_price_series([
+            record.frame.candles[symbol] for record in result.records
+        ])
+        label = _symbol_label("Close prices", result, symbol)
+        color = "tab:cyan" if len(result.allocation.allocations) == 1 else f"C{index % 10}"
+        axes.plot(timestamps, values, label=label, color=color)
 
 def plot_equity(axes: Axes, result: BacktestResult) -> None:
     """Plot total portfolio equity over time."""
@@ -106,8 +108,14 @@ def plot_drawdown(axes: Axes, result: BacktestResult) -> None:
 
 
 
-def plot_trade_markers(axes: Axes, result: BacktestResult, side: Side) -> None:
+def plot_trade_markers(
+    axes: Axes, result: BacktestResult, side: Side, symbol: str | None = None,
+) -> None:
     """Plot filled markers at fill times and prices for trades on ``side``."""
+    if symbol is None:
+        for asset in result.allocation.allocations:
+            plot_trade_markers(axes, result, side, asset)
+        return
     marker_by_side = {
         Side.BUY: "^",
         Side.SELL: "v"
@@ -117,8 +125,8 @@ def plot_trade_markers(axes: Axes, result: BacktestResult, side: Side) -> None:
         Side.SELL: "tab:blue",
     }
     
-    transformer = lambda result: trade_marker_series(result, side)
-    label = f"Trade markers for side {side.value.title()}"
+    transformer = lambda result: trade_marker_series(result, side, symbol)
+    label = _symbol_label(f"Trade markers for side {side.value.title()}", result, symbol)
 
     plot_markers(
         axes, 
@@ -133,20 +141,30 @@ def plot_trade_markers(axes: Axes, result: BacktestResult, side: Side) -> None:
     
 
 def plot_position_quantity(axes: Axes, result: BacktestResult) -> None:
-    """Plot the held quantity of the backtest symbol over time."""
-    plot_series(axes, result, position_quantity_series, label="Position quantity", color="tab:brown")
+    """Plot held shares separately for each symbol."""
+    for index, symbol in enumerate(result.allocation.allocations):
+        timestamps, values = position_quantity_series(result, symbol)
+        label = _symbol_label("Position quantity", result, symbol)
+        color = "tab:brown" if len(result.allocation.allocations) == 1 else f"C{index % 10}"
+        axes.plot(timestamps, values, label=label, color=color)
 
 def plot_market_value(axes: Axes, result: BacktestResult) -> None:
     """Plot invested market value, defined as total equity minus cash."""
     plot_series(axes, result, market_value_series, label="Market value", color="tab:gray")
 
-def plot_signal_markers(axes: Axes, result: BacktestResult, signal: Signal) -> None:
+def plot_signal_markers(
+    axes: Axes, result: BacktestResult, signal: Signal, symbol: str | None = None,
+) -> None:
     """Plot hollow markers where ``signal`` became known at candle close.
 
     The marker price is the signal candle's close, not the fill price of any
     resulting trade. Under the engine's timing model, that trade normally
     executes at the next candle's open.
     """
+    if symbol is None:
+        for asset in result.allocation.allocations:
+            plot_signal_markers(axes, result, signal, asset)
+        return
     marker_by_signal = {
         Signal.BUY: "^",
         Signal.SELL: "v",
@@ -158,9 +176,9 @@ def plot_signal_markers(axes: Axes, result: BacktestResult, signal: Signal) -> N
         Signal.SELL: "tab:blue",
         Signal.HOLD: "tab:gray"
     }
-    title = f"Signal {signal.value.title()} Markers"
+    title = _symbol_label(f"Signal {signal.value.title()} Markers", result, symbol)
 
-    transformer = lambda result: signal_marker_series(result, signal)
+    transformer = lambda result: signal_marker_series(result, signal, symbol)
     plot_markers(
         axes, 
         result, 
@@ -170,3 +188,7 @@ def plot_signal_markers(axes: Axes, result: BacktestResult, signal: Signal) -> N
         marker=marker_by_signal[signal],
         filled=False,
     )
+
+
+def _symbol_label(label: str, result: BacktestResult, symbol: str) -> str:
+    return f"{label} ({symbol})" if len(result.allocation.allocations) > 1 else label

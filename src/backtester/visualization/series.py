@@ -91,25 +91,28 @@ def drawdown_series(
 def trade_marker_series(
     result: BacktestResult,
     side: Side,
+    symbol: str | None = None,
 ) -> tuple[list[datetime], list[float]]:
     """Return fill timestamps and prices for trades matching ``side``."""
     return (
-        [trade.timestamp for trade in result.trades if trade.side == side],
-        [trade.fill_price for trade in result.trades if trade.side == side],
+        [trade.timestamp for trade in result.trades if trade.side == side and (symbol is None or trade.symbol == symbol)],
+        [trade.fill_price for trade in result.trades if trade.side == side and (symbol is None or trade.symbol == symbol)],
     )
 
 
 def position_quantity_series(
     result: BacktestResult,
+    symbol: str | None = None,
 ) -> tuple[list[datetime], list[int]]:
-    """Return timestamps and held quantities for the backtest symbol.
+    """Return held quantities for one symbol, defaulting to a singleton universe.
 
-    Records without an open position for ``result.symbol`` have quantity zero.
+    Records without an open position for the selected symbol have quantity zero.
     """
+    symbol = _resolve_symbol(result, symbol)
     return (
         [record.timestamp for record in result.records],
         [
-            record.snapshot.positions.get(result.symbol, 0)
+            record.snapshot.positions.get(symbol, 0)
             for record in result.records
         ],
     )
@@ -131,6 +134,7 @@ def market_value_series(
 def signal_marker_series(
     result: BacktestResult,
     signal: Signal,
+    symbol: str | None = None,
 ) -> tuple[list[datetime], list[float]]:
     """Return timestamps and closing prices for records matching ``signal``.
 
@@ -138,13 +142,24 @@ def signal_marker_series(
     execution price; a resulting trade normally executes at the next candle's
     open according to the backtest engine's timing model.
     """
+    symbol = _resolve_symbol(result, symbol)
     matching_records = [
         record
         for record in result.records
-        if record.generated_signal == signal
+        if record.generated_signal.signals.get(symbol) == signal
     ]
 
     return (
         [record.timestamp for record in matching_records],
-        [record.frame.close for record in matching_records],
+        [record.frame.candles[symbol].close for record in matching_records],
     )
+
+
+def _resolve_symbol(result: BacktestResult, symbol: str | None) -> str:
+    if symbol is None:
+        if len(result.allocation.allocations) != 1:
+            raise ValueError("Specify a symbol for a multi-asset series.")
+        return next(iter(result.allocation.allocations))
+    if symbol not in result.allocation.allocations:
+        raise ValueError(f"Unknown result symbol: {symbol}.")
+    return symbol
