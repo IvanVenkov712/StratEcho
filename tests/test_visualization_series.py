@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
+from dataclasses import replace
 
 import pytest
 
-from backtester.domain.market import Candle
-from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade
+from backtester.domain.market import Candle, MarketFrame
+from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade, MultiAssetSignal
+from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.engine.backtest_result import BacktestRecord, BacktestResult
 from backtester.visualization.series import (
     cash_series,
@@ -79,8 +81,8 @@ def make_record(
     signal: Signal = Signal.HOLD,
 ) -> BacktestRecord:
     return BacktestRecord(
-        frame=make_candle(timestamp, close=close),
-        generated_signal=signal,
+        frame=MarketFrame(timestamp, {"AAPL": make_candle(timestamp, close=close)}),
+        generated_signal=MultiAssetSignal({"AAPL": signal}),
         snapshot=PortfolioSnapshot(
             cash=cash,
             value=value,
@@ -94,7 +96,7 @@ def make_result(
     trades: list[Trade] | None = None,
 ) -> BacktestResult:
     return BacktestResult(
-        symbol="AAPL",
+        allocation=AssetAllocation({"AAPL": 1.0}),
         initial_cash=1_000.0,
         records=records or [],
         trades=trades or [],
@@ -262,3 +264,29 @@ def test_signal_marker_series_filters_signals_and_uses_candle_closes() -> None:
 
 def test_signal_marker_series_returns_empty_lists_when_signal_has_no_records() -> None:
     assert signal_marker_series(make_result(), Signal.SELL) == ([], [])
+
+
+def test_multi_asset_series_keep_symbols_separate() -> None:
+    record = BacktestRecord(
+        frame=MarketFrame(START, {
+            "AAPL": make_candle(START, close=100),
+            "MSFT": make_candle(START, close=200),
+        }),
+        generated_signal=MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.SELL}),
+        snapshot=PortfolioSnapshot(cash=0, positions={"AAPL": 3, "MSFT": 4}, value=1100),
+    )
+    result = replace(
+        make_result([record], [
+            Trade("AAPL", Side.BUY, 3, 99, 0, START),
+            Trade("MSFT", Side.BUY, 4, 199, 0, START),
+        ]),
+        allocation=AssetAllocation({"AAPL": 0.5, "MSFT": 0.5}),
+    )
+    assert signal_marker_series(result, Signal.BUY, "AAPL") == ([START], [100])
+    assert signal_marker_series(result, Signal.BUY, "MSFT") == ([], [])
+    assert signal_marker_series(result, Signal.SELL, "MSFT") == ([START], [200])
+    assert trade_marker_series(result, Side.BUY, "MSFT") == ([START], [199])
+    assert position_quantity_series(result, "AAPL") == ([START], [3])
+    assert position_quantity_series(result, "MSFT") == ([START], [4])
+    with pytest.raises(ValueError, match="Specify a symbol"):
+        position_quantity_series(result)
