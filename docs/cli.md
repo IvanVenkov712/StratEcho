@@ -14,6 +14,63 @@ strat-echo backtest
 ```
 
 If no command is provided, the CLI runs `backtest` with its default parameters.
+Option names must be written in full; abbreviated flags are rejected.
+
+## Symbols, allocations, and priorities
+
+Both commands accept one shared portfolio containing multiple assets:
+
+```powershell
+strat-echo backtest --symbols SPY QQQ --strategy buy-and-hold
+strat-echo compare --symbols SPY QQQ --allocation SPY=0.6 --allocation QQQ=0.3 --priority QQQ=-1
+```
+
+| Concern | Interface | Behavior |
+| --- | --- | --- |
+| Symbols | `--symbol SPY` or `--symbols SPY QQQ` | Mutually exclusive; both become one universe. Default: `SPY`. |
+| Allocations | Repeat `--allocation SYMBOL=WEIGHT` | Equal weights if entirely omitted; otherwise every symbol is required. |
+| Sizing | `--sizing` and related flags | Apply to every symbol; TOML can supply individual sizing settings. |
+| Strategies | `--strategy` and parameter flags | Shared settings, with a fresh strategy instance for every symbol. |
+| Priorities | Repeat `--priority SYMBOL=INTEGER` | Unspecified symbols get `0`; lower values execute first within each side, with alphabetical ties. |
+
+Symbols are trimmed and uppercased. Empty symbols, embedded whitespace,
+duplicate symbols, duplicate assignments, and assignments outside the universe
+are errors. Priority values may be negative. Weights must be finite fractions
+in `[0, 1]` with a total at most `1`; zero weights and totals below `1` are
+allowed. Weights are not rescaled to sum to `1`.
+
+Allocations are targets used to limit buys. The existing resolver calculates:
+
+```text
+buy budget = min(cash, max(0, portfolio equity * symbol weight - symbol holding value))
+```
+
+The snapshot is valued at the execution frame's opens and refreshed after each
+fill. All-in buys use this budget; percentage buys use a fraction of it.
+Weights do not reserve cash, generate orders, or automatically rebalance.
+Sell sizing uses the shares owned. Initial capital is shared by the universe,
+not granted separately to each symbol.
+
+Signals computed from frame T execute no earlier than frame T+1's open.
+The engine executes sells before buys, then sorts by ascending priority and
+symbol within each side. Command-line symbol order does not control execution.
+Earlier fills and their costs can affect later orders' budgets.
+
+`compare` uses the same universe, allocations, priorities, market frames,
+initial cash, costs, and buffer for both runs. The benchmark gets fresh
+instances per symbol and always uses all-in/all-out sizing. Metrics describe
+each whole portfolio. Reports show allocations and effective execution order;
+charts show separate price and position series per symbol.
+
+For CSV input, use a directory with one `SYMBOL.csv` file per symbol, or a single
+file with a `symbol` column containing the uppercase symbols. A multi-symbol
+run rejects a single CSV without that column. Within the requested range,
+every symbol must have identical, strictly increasing timestamps. There is no
+sorting, forward-filling, or automatic intersection of trading calendars.
+
+Existing `--symbol` commands continue to work. See
+[TOML configuration](configuration.md#multi-asset-settings) for per-symbol sizing
+and the rules for overriding collections from the CLI.
 
 ## TOML configuration
 
@@ -74,10 +131,10 @@ Save the four-panel backtest dashboard to an image file:
 python -m backtester.cli backtest --symbol AAPL --chart reports/aapl-backtest.png
 ```
 
-`--chart PATH` is available only for `backtest`. The image format is inferred
+`--chart PATH` saves a dashboard for either command. The image format is inferred
 from the path extension, missing parent directories are created, and an
 existing file is not overwritten. It can also be set as `chart = "PATH"` in
-the configuration file's `[backtest]` table.
+the configuration file's `[backtest]` or `[compare]` table respectively.
 
 Output uses the format `label: result`. The dates and metric values below are
 illustrative:
@@ -86,6 +143,9 @@ illustrative:
 Backtest parameters
 Strategy: Simple Moving Average Crossover with short window=20, long window=50
 Asset: SPY
+Allocations: SPY=100.00%
+Priorities: SPY=0
+Execution order: sells before buys; within each side: SPY
 Requested period: <resolved-start-date> (inclusive) to <resolved-end-date> (exclusive)
 Data used: <first-candle-date> through <last-candle-date> (<count> candles)
 Data span: <elapsed-calendar-days> calendar days (<elapsed-calendar-years> years)
@@ -138,6 +198,9 @@ Benchmark comparison parameters
 Strategy: Simple Moving Average Crossover with short window=20, long window=50
 Benchmark: Buy and Hold
 Asset: SPY
+Allocations: SPY=100.00%
+Priorities: SPY=0
+Execution order: sells before buys; within each side: SPY
 Requested period: <resolved-start-date> (inclusive) to <resolved-end-date> (exclusive)
 Data used: <first-candle-date> through <last-candle-date> (<count> candles)
 Data span: <elapsed-calendar-days> calendar days (<elapsed-calendar-years> years)
@@ -167,6 +230,9 @@ Number of trades                     4           1            3
 - `--config`: TOML configuration path; default lookup is `strat-echo.toml` in
   the current working directory; see [TOML configuration](configuration.md)
 - `--symbol`: asset symbol, default `SPY`
+- `--symbols`: one or more asset symbols; mutually exclusive with `--symbol`
+- `--allocation`: repeatable `SYMBOL=WEIGHT`; equal weights if omitted, otherwise all symbols required
+- `--priority`: repeatable `SYMBOL=INTEGER`; default `0`, ascending within each side with alphabetical ties
 - `--years`: calendar years used to derive a missing date boundary, default `5`
 - `--start`: inclusive start date in `YYYY-MM-DD` format
 - `--end`: exclusive end date in `YYYY-MM-DD` format
@@ -178,9 +244,9 @@ Number of trades                     4           1            3
 - `--sizing`: `all-in-all-out`, `fixed`, or `percent`, default `all-in-all-out`
 - `--buy-size`: positive whole-share quantity required with `--sizing fixed`
 - `--sell-size`: positive whole-share quantity required with `--sizing fixed`
-- `--buy-percent`: fraction of available cash from `0` to `1`, required with `--sizing percent`
+- `--buy-percent`: fraction of the cash-limited allocation gap from `0` to `1`, required with `--sizing percent`
 - `--sell-percent`: fraction of owned shares from `0` to `1`, required with `--sizing percent`
-- `--buffer-rate`: optional fraction of cash reserved from buys, from `0` inclusive to `1` exclusive; compatible with every sizing policy
+- `--buffer-rate`: optional fraction of each buy's allocation-gap budget left unspent, from `0` inclusive to `1` exclusive; compatible with every sizing policy
 - `--commission-model`: `none`, `fixed`, or `proportional`, default `none`
 - `--fixed-commission`: non-negative cash amount per executed trade, required with `--commission-model fixed`
 - `--commission-rate`: fraction of trade notional from `0` to `1`, required with `--commission-model proportional`
@@ -192,9 +258,9 @@ excluded. Date boundaries are resolved consistently as follows:
 | Supplied dates | Resolution |
 | --- | --- |
 | Neither date, Yahoo Finance | `end = today`, `start = end - years` |
-| Neither date, CSV with `start-csv` | `start = first CSV candle for the selected symbol`, `end = start + years` |
+| Neither date, CSV with `start-csv` | `start = earliest first CSV candle across the universe`, `end = start + years` |
 | Neither date, CSV with `end-today` | `end = today`, `start = end - years` |
-| Neither date, CSV with `end-csv` | `end = day after the selected symbol's last CSV candle`, `start = end - years` |
+| Neither date, CSV with `end-csv` | `end = day after the latest last CSV candle across the universe`, `start = end - years` |
 | Only `--end` | `start = end - years` |
 | Only `--start` | `end = start + years` |
 | Both dates | Use both; `years` is not applied |
@@ -215,13 +281,14 @@ candles, using the same 365.25-day year as the annualized-return calculation.
 
 ## Buffered quantity resolution
 
-`--buffer-rate` caps buy orders to the whole shares affordable after reserving
-the configured fraction of current cash. The CLI implements this by wrapping
+`--buffer-rate` caps buy orders to the whole shares affordable after leaving
+the configured fraction of that order's allocation-gap budget unspent. This
+is not a separately reserved pool of portfolio cash. The CLI wraps
 the base `QuantityResolver` in `BufferQuantityResolver`; it does not alter sell
 quantities.
 
 ```powershell
-# Reserve 5% of cash while otherwise using all-in/all-out sizing
+# Leave 5% of each buy budget unspent with all-in/all-out sizing
 python -m backtester.cli backtest --buffer-rate 0.05
 
 # The same modifier can wrap fixed or percentage sizing
@@ -273,9 +340,9 @@ For example, `--fixed-commission` may only be supplied with
 
 Position sizing uses the next-candle open as its reference price. All-in and
 percentage BUY quantities include commission and adverse slippage in their
-budget checks, even without `--buffer-rate`. An unbuffered fixed BUY remains an
-exact request and can be rejected when its final cost exceeds available cash.
-A rejected order is recorded with an `INSUFFICIENT_FUNDS` or
+budget checks, even without `--buffer-rate`. A fixed BUY that exceeds its
+allocation-gap budget is skipped by the resolver without a broker rejection.
+Orders actually rejected by the broker are recorded with an `INSUFFICIENT_FUNDS` or
 `INSUFFICIENT_POSITION` execution status, but no trade is created and no
 commission is charged. The CLI lists the order's submission time, side,
 quantity, symbol, and the corresponding `Insufficient funds` or

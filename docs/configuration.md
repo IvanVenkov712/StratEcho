@@ -91,7 +91,7 @@ shared by both commands, including the strategy under test. Consequently,
 `backtest`. Position sizing applies to the strategy run; the benchmark always
 uses all-in/all-out while retaining the configured cash buffer. The `chart`
 setting is the other exception: it applies only to
-`backtest`, because `compare` does not yet provide a comparison chart.
+`backtest`; comparison charts use `[compare].chart`.
 Strategy parameters are shared between the strategy and benchmark; there are
 no benchmark-specific window or threshold keys.
 
@@ -99,10 +99,10 @@ Supported keys are:
 
 | Group | Keys |
 | --- | --- |
-| Data and period | `symbol`, `years`, `start`, `end`, `source`, `csv_path`, `csv_period_anchor` |
-| Portfolio | `initial_capital` |
+| Data and period | `symbol` or `symbols`, `years`, `start`, `end`, `source`, `csv_path`, `csv_period_anchor` |
+| Portfolio | `initial_capital`, `allocations`, `priorities` |
 | Output | `chart` |
-| Position sizing | `sizing`, `buy_size`, `sell_size`, `buy_percent`, `sell_percent`, `buffer_rate` |
+| Position sizing | `sizing`, `buy_size`, `sell_size`, `buy_percent`, `sell_percent`, `buffer_rate`, `sizing_by_symbol` |
 | Execution costs | `commission_model`, `fixed_commission`, `commission_rate`, `slippage_rate` |
 | Strategy selection | `strategy` |
 | Moving average | `short_window`, `long_window` |
@@ -130,8 +130,70 @@ mapping, formulas, constraints, signal timing, and warm-up behavior.
 
 ### The `[compare]` table
 
-`[compare]` contains only `benchmark`. It is applied by the `compare` command
+`[compare]` contains `benchmark` and optional `chart`. It is applied by the `compare` command
 and ignored by `backtest`.
+
+### Multi-asset settings
+
+```toml
+[backtest]
+symbols = ["SPY", "QQQ"]
+source = "csv"
+csv_path = "data" # SPY.csv and QQQ.csv; a combined file needs a symbol column
+strategy = "simple-moving-average"
+short_window = 10
+long_window = 40
+allocations = { SPY = 0.6, QQQ = 0.3 }
+priorities = { QQQ = -1 } # SPY defaults to 0
+sizing = "percent"
+buy_percent = 0.5
+sell_percent = 1.0
+
+[backtest.sizing_by_symbol.QQQ]
+sizing = "fixed"
+buy_size = 2
+sell_size = 2
+
+[compare]
+benchmark = "buy-and-hold"
+```
+
+`symbols` is a non-empty array of strings and cannot coexist with `symbol`.
+Both forms are trimmed and uppercased. `allocations` and `priorities` are tables
+keyed by symbol; nested tables such as `[backtest.allocations]` are equivalent
+to the inline form above. Allocation values are finite numbers in `[0, 1]`,
+totaling at most `1`, with a weight for every symbol. Entirely omitting the
+table selects equal weights; an empty or partial table is an error.
+Priorities are integers, including negative values, with unspecified symbols
+defaulting to `0`. Unknown symbols and duplicates after normalization fail.
+
+Each `[backtest.sizing_by_symbol.SYMBOL]` table may contain only `sizing`,
+`buy_size`, `sell_size`, `buy_percent`, and `sell_percent`. Unspecified settings
+inherit the global sizing values. Changing a symbol's sizing mode discards
+inherited parameters for the previous mode. Each resulting plan must be valid.
+`buffer_rate` remains a shared modifier and cannot be set per symbol.
+
+Sizing precedence is **CLI flags > per-symbol TOML > global TOML > defaults**.
+An explicit CLI sizing flag or parameter applies to every symbol. Changing the
+mode discards the old mode's TOML parameters for each affected symbol. Strategies
+and their parameters are shared, with distinct instances per symbol and run.
+The benchmark always uses all-in/all-out regardless of per-symbol sizing.
+
+An explicit `--symbol` or `--symbols` replaces either TOML universe form.
+Other symbol-specific TOML settings are retained and validated against that
+universe; stale entries cause an error. Supplying any CLI `--allocation`
+replaces the entire TOML allocation table, so the CLI must supply every weight.
+Supplying any CLI `--priority` replaces the TOML priority table, with omitted
+symbols reverting to `0`. Collections are never partially merged or silently
+rescaled. For example:
+
+```powershell
+strat-echo backtest --config multi.toml --allocation SPY=0.5 --allocation QQQ=0.5 --priority SPY=-2
+strat-echo backtest --config multi.toml --sizing fixed --buy-size 4 --sell-size 4
+```
+
+See [CLI universe behavior](cli.md#symbols-allocations-and-priorities) for
+allocation budgets, execution order, and strict data alignment.
 
 ## TOML value types
 
@@ -143,7 +205,7 @@ Rates are decimal fractions. For example, `0.001` means `0.1%`, not `0.001%`.
 
 `chart` is a quoted output path whose extension selects the image format. Its
 parent directories are created automatically, and an existing file is not
-overwritten. It is equivalent to passing `--chart PATH` to `backtest`.
+overwritten. It is equivalent to passing `--chart PATH` to the corresponding command.
 
 ## Validation and related settings
 
@@ -177,8 +239,9 @@ python -m backtester.cli backtest --config percent.toml --sizing fixed --buy-siz
 ```
 
 `buffer_rate` is independent of the base sizing selection. When present, it
-caps buys to leave the configured fraction of current cash unspent, while
-sells are unchanged. For example, `buffer_rate = 0.05` reserves 5% of cash.
+caps buys to leave the configured fraction of each order's cash-limited
+allocation gap unspent, while sells are unchanged. For example,
+`buffer_rate = 0.05` leaves 5% of that buy budget unspent.
 The CLI applies it by wrapping the base `QuantityResolver` in a
 `BufferQuantityResolver`. Both resolvers share one `BuyQuantityCapper`, so buy
 affordability uses the same commission and slippage models as the broker.

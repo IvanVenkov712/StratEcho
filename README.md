@@ -24,6 +24,8 @@ Strat Echo can:
 - compare a strategy against a benchmark on the same market data;
 - visualize prices, signals, fills, portfolio state, positions, and drawdown;
 - configure CLI runs from TOML with explicit CLI-over-file precedence.
+- run a shared multi-asset portfolio with allocation weights, per-symbol priorities,
+  and independent strategy instances.
 
 ## Installation
 
@@ -58,6 +60,18 @@ Compare a strategy with buy and hold:
 ```powershell
 python -m backtester.cli compare --strategy simple-moving-average --benchmark buy-and-hold --symbol SPY
 ```
+
+Run a universe with equal weights, or supply every allocation explicitly:
+
+```powershell
+strat-echo backtest --symbols SPY QQQ --strategy buy-and-hold
+strat-echo compare --symbols SPY QQQ --allocation SPY=0.6 --allocation QQQ=0.4 --priority QQQ=-1
+```
+
+`--symbol` and `--symbols` are mutually exclusive. Sizing and strategy flags
+apply to every symbol; TOML also supports individual sizing. The
+[CLI reference](docs/cli.md#symbols-allocations-and-priorities) explains defaults,
+validation, execution ordering, and multi-symbol CSV formats.
 
 Comparison output shows every common metric in three value columns: the
 strategy result, the benchmark result, and the difference calculated as
@@ -110,17 +124,18 @@ Position sizing converts a signal into a whole-share order quantity.
 
 | CLI name | Behavior |
 | --- | --- |
-| `all-in-all-out` | Buys the maximum affordable whole shares and sells the entire position. |
+| `all-in-all-out` | Buys the maximum affordable whole shares within the symbol's allocation gap and sells the entire position. |
 | `fixed` | Uses explicit buy and sell share quantities. |
-| `percent` | Uses a fraction of available cash for buys and a fraction of owned shares for sells. |
+| `percent` | Uses a fraction of the cash-limited allocation gap for buys and a fraction of owned shares for sells. |
 
 All-in/all-out is the default. Percentage sizing does not target a
 percentage of total portfolio equity. Because the engine supports only whole
 shares, a valid sizing decision can produce a quantity of zero.
 
 The optional `--buffer-rate` limits buy quantities so that the configured
-fraction of current cash remains unspent, while sell quantities still follow
-the selected policy. For example, `--buffer-rate 0.05` reserves 5% of cash.
+fraction of each allocation-gap buy budget remains unspent, while sell quantities
+still follow the selected policy. For example, `--buffer-rate 0.05` leaves 5% of
+that budget unspent.
 When configured, `BufferQuantityResolver` wraps the base `QuantityResolver`.
 Both use the same `BuyQuantityCapper`, which includes configured commission
 and adverse slippage when checking how many shares fit within the budget.
@@ -212,13 +227,13 @@ strategy's warm-up and signal rules under this timing model.
 
 ### Backtest results
 
-`BacktestEngine.run()` returns a cached `BacktestResult` containing the traded
-symbol, the cash captured when the engine was created, chronological
-per-candle records, successful trades produced by that run, and every attempted
+`BacktestEngine.run()` returns a cached `BacktestResult` containing the asset
+allocations, the cash captured when the engine was created, chronological
+market-frame records, successful trades produced by that run, and every attempted
 order execution, including rejections.
 
-Each `BacktestRecord` retains the original `Candle`, the signal generated from
-that candle, and an end-of-candle `PortfolioSnapshot`. The snapshot separates
+Each `BacktestRecord` retains a `MarketFrame` of aligned candles, per-symbol
+signals, and an end-of-frame `PortfolioSnapshot`. The snapshot separates
 cash, position quantities, and total portfolio value. It is valued with the
 current candle's close after any pending order has executed at that candle's
 open. `BacktestRecord.market_value` is the value of all open positions and is
@@ -245,10 +260,10 @@ notional (`quantity * fill price`). Rates use decimal fractions, so `0.001`
 means `0.1%`.
 
 All-in and percentage BUY quantities are resolved against a budget that
-already includes the configured commission and adverse slippage. Fixed BUY
-instructions remain exact and can be rejected when unaffordable unless a
-`--buffer-rate` is supplied; with a buffer, fixed quantities are capped to the
-affordable amount. A rejected order remains visible in the backtest result, but
+already includes the configured commission and adverse slippage. A fixed BUY
+that exceeds its allocation-gap budget is skipped by the resolver. An otherwise
+affordable fixed quantity can be reduced by `--buffer-rate`. A broker-rejected
+order remains visible in the backtest result, but
 it does not create a trade or change the portfolio. The CLI displays
 individual rejection details with the concise reason `Insufficient funds` or
 `Insufficient position` when there are at most 10 rejected orders; above that
