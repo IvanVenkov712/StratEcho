@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 from numbers import Real
+from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -47,3 +48,38 @@ class Candle:
 
         if not self.low <= self.close <= self.high:
             raise ValueError("Candle close price must be between low and high.")
+
+
+@dataclass(frozen=True)
+class MarketFrame:
+    timestamp: datetime
+    candles: Mapping[str, Candle]
+
+    def __post_init__(self):
+        for candle in self.candles.values():
+            if candle.timestamp != self.timestamp:
+                raise ValueError("All candles should have the same timestamp equal to self.timestamp")
+
+    def open_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.open
+            for symbol, candle in self.candles.items()
+        }
+
+    def close_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.close
+            for symbol, candle in self.candles.items()
+        }
+
+    def high_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.high
+            for symbol, candle in self.candles.items()
+        }
+
+    def low_prices(self) -> dict[str, float]:
+        return {
+            symbol: candle.low
+            for symbol, candle in self.candles.items()
+        }

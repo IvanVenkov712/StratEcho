@@ -226,6 +226,34 @@ def test_order_rejects_empty_symbol() -> None:
         make_order("", Side.BUY, quantity=1)
 
 
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+def test_execute_rejects_fill_before_submission_without_side_effects(side: Side) -> None:
+    portfolio = make_portfolio_mock(cash=1_000, owned_quantity=1)
+    broker, execution_model, commission_model = make_broker(portfolio)
+    order = make_order("AAPL", side, quantity=1)
+
+    with pytest.raises(ValueError, match="Execution timestamp cannot precede order submission"):
+        execute_order(broker, order, price=20, timestamp=SIGNAL_TIMESTAMP)
+
+    execution_model.calculate_fill_price.assert_not_called()
+    commission_model.calculate.assert_not_called()
+    assert portfolio.cash == 1_000
+    assert portfolio.mock_calls == []
+
+
+def test_execute_accepts_fill_at_submission_timestamp() -> None:
+    portfolio = make_portfolio_mock(cash=1_000)
+    broker, _, _ = make_broker(portfolio)
+    order = make_order("AAPL", Side.BUY, quantity=1)
+
+    execution = execute_order(broker, order, price=20, timestamp=ORDER_TIMESTAMP)
+
+    assert execution.status is OrderExecutionStatus.SUCCESS
+    assert execution.trade.timestamp == ORDER_TIMESTAMP
+    assert portfolio.cash == 978
+    portfolio.add_position.assert_called_once_with("AAPL", 1)
+
+
 def test_trade_rejects_non_positive_price() -> None:
     with pytest.raises(ValueError, match="Price must be positive"):
         Trade(

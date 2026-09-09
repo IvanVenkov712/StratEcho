@@ -5,6 +5,7 @@ from math import isfinite
 from numbers import Real
 
 from backtester.domain.trading import PortfolioSnapshot
+from backtester.sizing.asset_allocation import AssetAllocation
 
 
 class Portfolio:
@@ -62,26 +63,32 @@ class Portfolio:
         else:
             self._positions[symbol] = remaining
 
-    def value(self, prices: Mapping[str, float]) -> float:
+    def value(self, prices: Mapping[str, float], strict: bool = True) -> float:
         """Return cash plus the market value of every open position."""
         total = self.cash
         for symbol, quantity in self._positions.items():
-            if symbol not in prices:
+            if symbol not in prices and strict:
                 raise ValueError(f"Missing market price for position: {symbol}.")
 
-            price = prices[symbol]
+            price = prices.get(symbol, 0)
             self._validate_price(price)
             total += float(price) * quantity
 
         return total
 
-    def snapshot(self, prices: Mapping[str, float]) -> PortfolioSnapshot:
+    def snapshot(self, prices: Mapping[str, float], strict: bool = True) -> PortfolioSnapshot:
         """Capture cash, total value, and a copy of current positions."""
         return PortfolioSnapshot(
-            value=self.value(prices),
+            value=self.value(prices, strict),
             cash=self.cash,
             positions=self.positions
         )
+
+    def usable_cash_per_symbol(self, allocation: AssetAllocation) -> dict[str, float]:
+        return {
+            symbol: self.cash * weight
+            for symbol, weight in allocation.allocations.items()
+        }
 
     @staticmethod
     def _validate_cash(value: float) -> None:
@@ -96,8 +103,8 @@ class Portfolio:
         if not isinstance(value, Real) or not isfinite(value):
             raise ValueError("Market price must be a finite number.")
 
-        if value <= 0:
-            raise ValueError("Market price must be positive.")
+        if value < 0:
+            raise ValueError("Market price must be non-negative.")
 
     @staticmethod
     def _validate_quantity(value: int, label: str) -> None:

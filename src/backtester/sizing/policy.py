@@ -20,3 +20,7 @@ class SizingPlan:
             return self.sell
         else:
             raise ValueError("invalid side")
+
+@dataclass(frozen=True)
+class MultiAssetSizingPlan:
+    plans: dict[str, SizingPlan]

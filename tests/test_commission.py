@@ -29,6 +29,12 @@ def test_fixed_commission_model_rejects_negative_commission() -> None:
         FixedCommissionModel(commission=-0.01)
 
 
+@pytest.mark.parametrize("commission", [float("inf"), float("-inf"), float("nan")])
+def test_fixed_commission_model_rejects_non_finite_commission(commission: float) -> None:
+    with pytest.raises(ValueError, match="Commission must be a finite number"):
+        FixedCommissionModel(commission)
+
+
 def test_proportional_commission_model_uses_trade_notional() -> None:
     commission_model = ProportionalCommissionModel(percent=0.015)
 

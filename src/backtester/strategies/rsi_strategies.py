@@ -4,7 +4,7 @@ from typing import Callable
 
 from backtester.domain.market import Candle
 from backtester.domain.trading import Signal
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.strategies.calculators import RSICalculator, CutlerRSICalculator, ExponentialRSICalculator, \
     WilderRSICalculator
 
@@ -56,7 +56,7 @@ from backtester.strategies.calculators import RSICalculator, CutlerRSICalculator
 #
 #     return rsi
 
-class RSIStrategy(Strategy):
+class RSIStrategy(SingleAssetStrategy):
     """Buy below the lower RSI threshold and sell above the upper threshold."""
 
     def __init__(self,

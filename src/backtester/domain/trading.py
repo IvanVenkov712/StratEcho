@@ -1,10 +1,11 @@
 """Trading signals, sizing instructions, orders, and fills."""
-
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
 from math import isfinite
 from numbers import Real
+from types import MappingProxyType
 
 class Signal(Enum):
     """Action proposed by a strategy after observing available candles."""
@@ -34,6 +35,15 @@ class OrderExecutionStatus(Enum):
     PRICE_NOT_FOUND = "price_not_found"
     VALIDATION_ERROR = "validation_error"
     UNKNOWN_ERROR = "unknown_error"
+
+@dataclass(frozen=True)
+class MultiAssetSignal:
+    """Immutable copy of per-symbol signals at one observation."""
+
+    signals: Mapping[str, Signal]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "signals", MappingProxyType(dict(self.signals)))
 
 @dataclass(frozen=True)
 class SizingInstruction:

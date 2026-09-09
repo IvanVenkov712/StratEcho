@@ -12,8 +12,9 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import PercentFormatter
 
-from backtester.domain.market import Candle
-from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade
+from backtester.domain.market import Candle, MarketFrame
+from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade, MultiAssetSignal
+from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.engine.backtest_result import BacktestRecord, BacktestResult
 from backtester.visualization import dashboard
 
@@ -22,7 +23,7 @@ START = datetime(2026, 1, 1)
 
 
 EMPTY_RESULT = BacktestResult(
-    symbol="AAPL",
+    allocation=AssetAllocation({"AAPL": 1.0}),
     initial_cash=1_000.0,
     records=[],
     trades=[],
@@ -39,15 +40,15 @@ def populated_result() -> BacktestResult:
     signals = [Signal.BUY, Signal.HOLD, Signal.SELL, Signal.HOLD]
     records = [
         BacktestRecord(
-            candle=Candle(
+            frame=MarketFrame(START + timedelta(days=index), {"AAPL": Candle(
                 timestamp=START + timedelta(days=index),
                 open=close,
                 high=close,
                 low=close,
                 close=close,
                 volume=1_000,
-            ),
-            generated_signal=signal,
+            )}),
+            generated_signal=MultiAssetSignal({"AAPL": signal}),
             snapshot=PortfolioSnapshot(
                 cash=cash,
                 value=value,
@@ -63,7 +64,7 @@ def populated_result() -> BacktestResult:
         Trade("AAPL", Side.SELL, 5, 100.0, 0.0, START + timedelta(days=3)),
     ]
     return BacktestResult(
-        symbol="AAPL",
+        allocation=AssetAllocation({"AAPL": 1.0}),
         initial_cash=1_000.0,
         records=records,
         trades=trades,

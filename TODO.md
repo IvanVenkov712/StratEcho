@@ -16,6 +16,10 @@ not in this backlog.
   or `N/A` policy.
 ## Engine and public API
 
+- [ ] Define reporting for fixed buys that exceed the allocation-gap budget.
+  The quantity resolver currently returns -1, so no order or broker rejection
+  is recorded. Distinguish allocation-budget limits from insufficient portfolio
+  cash when deciding how skipped intents should appear in results.
 - [ ] Validate that `Strategy.on_candle()` returns a `Signal`; invalid values
   must fail clearly instead of being treated like `HOLD`.
 - [ ] Define ownership of stateful backtest dependencies. Either require a fresh

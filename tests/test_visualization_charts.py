@@ -10,8 +10,9 @@ from matplotlib.figure import Figure
 from matplotlib.markers import MarkerStyle
 from matplotlib.path import Path as MatplotlibPath
 
-from backtester.domain.market import Candle
-from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade
+from backtester.domain.market import Candle, MarketFrame
+from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade, MultiAssetSignal
+from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.engine.backtest_result import BacktestRecord, BacktestResult
 from backtester.visualization.charts import (
     plot_cash,
@@ -47,7 +48,7 @@ def make_record(
     )
     positions = {"AAPL": quantity} if quantity else {}
     snapshot = PortfolioSnapshot(cash=cash, value=value, positions=positions)
-    return BacktestRecord(candle, signal, snapshot)
+    return BacktestRecord(MarketFrame(timestamp, {"AAPL": candle}), MultiAssetSignal({"AAPL": signal}), snapshot)
 
 
 @pytest.fixture
@@ -98,7 +99,7 @@ def result() -> BacktestResult:
         ),
     ]
     return BacktestResult(
-        symbol="AAPL",
+        allocation=AssetAllocation({"AAPL": 1.0}),
         initial_cash=1_000.0,
         records=records,
         trades=trades,

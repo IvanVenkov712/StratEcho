@@ -3,11 +3,11 @@
 from typing import Sequence
 
 from backtester.domain.market import Candle
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.domain.trading import Signal
 
 
-class BuyAndHoldStrategy(Strategy):
+class BuyAndHoldStrategy(SingleAssetStrategy):
     """Emit one buy signal on the first call and hold thereafter."""
 
     def __init__(self):

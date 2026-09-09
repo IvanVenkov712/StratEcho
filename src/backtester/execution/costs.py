@@ -1,6 +1,8 @@
 """Slippage, commission, and estimated execution-cost models."""
 
 from abc import ABC, abstractmethod
+from math import isfinite
+from numbers import Real
 
 from backtester.domain.trading import Side
 
@@ -56,6 +58,8 @@ class FixedCommissionModel(CommissionModel):
     _commission: float
 
     def __init__(self, commission: float):
+        if not isinstance(commission, Real) or not isfinite(commission):
+            raise ValueError("Commission must be a finite number.")
         if commission < 0:
             raise ValueError("Non-negative commission is required")
         self._commission = commission

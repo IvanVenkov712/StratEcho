@@ -70,13 +70,26 @@ def print_parameters(
     benchmark_sizing_name: str | None = None,
     commission_name: str,
     slippage_name: str,
+    allocations: dict[str, float] | None = None,
+    priorities: dict[str, int] | None = None,
 ) -> None:
     """Print the effective parameters of a backtest or comparison."""
     print(title, file=output)
     print(f"Strategy: {strategy_name}", file=output)
     if benchmark_name is not None:
         print(f"Benchmark: {benchmark_name}", file=output)
-    print(f"Asset: {symbol}", file=output)
+    label = "Assets" if allocations and len(allocations) > 1 else "Asset"
+    print(f"{label}: {symbol}", file=output)
+    if allocations is not None:
+        print("Allocations: " + ", ".join(
+            f"{symbol}={weight:.2%}" for symbol, weight in allocations.items()
+        ), file=output)
+    if priorities is not None:
+        ordered = sorted(priorities, key=lambda symbol: (priorities[symbol], symbol))
+        print("Priorities: " + ", ".join(
+            f"{symbol}={priorities[symbol]}" for symbol in ordered
+        ), file=output)
+        print("Execution order: sells before buys; within each side: " + ", ".join(ordered), file=output)
     print(
         f"Requested period: {start} (inclusive) to {end} (exclusive)",
         file=output,
@@ -112,11 +125,12 @@ def _print_data_period(output: TextIO, result: BacktestResult) -> None:
     first_timestamp = result.records[0].timestamp
     last_timestamp = result.records[-1].timestamp
     observation_count = len(result.records)
+    observation_label = "frames" if len(result.allocation.allocations) > 1 else "candles"
 
     print(
         "Data used: "
         f"{_format_date(first_timestamp)} through {_format_date(last_timestamp)} "
-        f"({observation_count:,} candles)",
+        f"({observation_count:,} {observation_label})",
         file=output,
     )
 
@@ -314,6 +328,8 @@ def describe_data_source(args: argparse.Namespace) -> str:
 
         csv_path = args.csv_path
         if csv_path.is_dir():
+            if len(args.symbols) > 1:
+                return f"csv, directory: {csv_path.as_posix()} (SYMBOL.csv per asset)"
             csv_path = csv_path / f"{args.symbol}.csv"
         display_path = csv_path.as_posix()
         return f"csv, file: {display_path}"
@@ -340,6 +356,17 @@ def describe_sizing(args: argparse.Namespace) -> str:
         return f"{description}, cash buffer={args.buffer_rate:.2%}"
 
     return description
+
+
+def describe_universe_sizing(args: argparse.Namespace) -> str:
+    """Show the shared sizing once, or label each symbol's individual sizing."""
+    descriptions = {
+        symbol: describe_sizing(settings)
+        for symbol, settings in args.sizing_by_symbol.items()
+    }
+    if len(set(descriptions.values())) == 1:
+        return next(iter(descriptions.values()))
+    return "; ".join(f"{symbol}: {description}" for symbol, description in descriptions.items())
 
 
 def describe_all_in_all_out_sizing(args: argparse.Namespace) -> str:

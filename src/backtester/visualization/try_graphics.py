@@ -1,28 +1,21 @@
+"""Display the local MSFT RSI demo dashboard.
+
+Run with ``python -m backtester.visualization.try_graphics`` after installing
+the project in editable mode. Data comes from the repository's data/MSFT.csv.
+"""
+
 from matplotlib import pyplot as plt
 
-from backtester.domain.trading import Side, Signal
-from backtester.visualization.charts import plot_equity, plot_cash, plot_drawdown, \
-    plot_position_quantity, plot_market_value, plot_signal_markers, plot_trade_markers, plot_close_prices
+from backtester.visualization.dashboard import create_backtest_figure
 from backtester.visualization.sample_data import load_results
-results = load_results()
-
-# figure, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(10, 5))
-
-figure, ax = plt.subplots(1, 1, figsize=(10, 5))
 
 
-# plot_equity(ax1, results)
-# plot_cash(ax2, results)
-# plot_position_quantity(ax2, results)
-# plot_drawdown(ax3, results)
-# plot_trade_marker(ax4, results, Side.BUY)
-print(__file__)
-plot_trade_markers(ax, results, Side.BUY)
-plot_trade_markers(ax, results, Side.SELL)
-plot_signal_markers(ax, results, Signal.BUY)
-plot_signal_markers(ax, results, Signal.SELL)
-plot_close_prices(ax, results)
+def main() -> None:
+    """Run the sample backtest and display prices, portfolio, position, and risk."""
+    results = load_results()
+    create_backtest_figure(results, title="MSFT - Wilder RSI (14), thresholds 30/70")
+    plt.show()
 
-figure.autofmt_xdate()
-figure.tight_layout()
-plt.show()
+
+if __name__ == "__main__":
+    main()

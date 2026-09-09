@@ -1,63 +1,79 @@
 """Chronological backtest orchestration with next-candle-open execution."""
 
 from datetime import datetime
-from typing import Sequence
+from typing import Sequence, Callable
 
-from backtester.data.validation import validate_candles_chronological
-from backtester.domain.market import Candle
-from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult
+from backtester.data.validation import validate_frames_chronological, validate_symbols
+from backtester.domain.market import MarketFrame
+from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult, MultiAssetSignal, Trade
 from backtester.engine.backtest_result import BacktestResult, BacktestRecord
 from backtester.execution.broker import Broker
-from backtester.resolving.resolver import OrderResolver, ResolutionContext
-from backtester.sizing.policy import SizingPlan
-from backtester.strategies.base import Strategy
+from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
+from backtester.sizing.asset_allocation import AssetAllocation
+from backtester.sizing.policy import MultiAssetSizingPlan
+from backtester.strategies.multi_asset.base import MultiAssetStrategy
 
 
 class BacktestEngine:
-    """Run a single-symbol backtest with explicit next-candle execution.
+    """Run a multi-asset backtest with next-frame-open execution.
 
-    The engine feeds the strategy only the candles available up to the current
-    point in time. A signal generated from candle T creates an order intent.
-    At candle T+1 open, the position sizer uses the current portfolio and opening
-    price to determine the order quantity immediately before execution. This
-    keeps signal generation separate from execution and avoids look-ahead bias.
+    Signals generated from frame T create intents for frame T+1 open. Pending
+    sells precede buys; within each side, lower priority values execute first,
+    with symbol order breaking ties. Each intent is sized from a fresh opening
+    portfolio snapshot, including the effects of earlier fills in that frame.
+
+    The strategy receives the current frame only after pending execution.
+    Allocation weights constrain buy sizing without generating rebalance orders.
+    Allocation keys define the supported symbols. Every frame and the sizing
+    plan must contain exactly those symbols; signals may contain a subset.
     """
 
     def __init__(
             self,
-            strategy: Strategy,
+            strategy: MultiAssetStrategy,
             broker: Broker,
-            plan: SizingPlan,
+            allocation: AssetAllocation,
+            sizing: MultiAssetSizingPlan,
             resolver: OrderResolver,
-            data: Sequence[Candle],
-            symbol: str
+            priority: Callable[[str], int],
+            data: Sequence[MarketFrame],
     ):
-        """Create a backtest engine for one strategy, broker, data set, and symbol.
+        """Create a backtest engine for one strategy and a shared portfolio.
 
         Args:
-            strategy: Trading strategy that converts available candle history
-                into a buy, sell, or hold signal.
+            strategy: Trading strategy that processes chronological market
+                frames and produces per-symbol buy, sell, or hold signals.
             broker: Broker responsible for order execution and portfolio
                 accounting.
-            plan: Buy and sell sizing instructions attached to generated order
-                intents.
+            allocation: Per-symbol fractions of total equity used as buy-sizing
+                targets, without automatic rebalancing or cash reservation.
+            sizing: Per-symbol buy and sell instructions attached to intents.
             resolver: Component that converts pending intents into whole-share
-                orders using execution costs and the next candle's opening
+                orders using execution costs and the next frame's opening
                 portfolio snapshot.
-            data: Chronologically ordered candles used by the simulation.
-            symbol: Asset symbol traded by this engine.
+            priority: Symbol ranking within each order side; lower values execute
+                first, with lexicographic symbol order breaking ties.
+            data: Chronologically ordered market frames used by the simulation.
         """
 
         validated_data = tuple(data)
-        validate_candles_chronological(validated_data)
+        validate_frames_chronological(validated_data)
+        supported_symbols = frozenset(allocation.allocations)
+        validate_symbols(sizing.plans, supported_symbols, source="Sizing plan")
+        for frame in validated_data:
+            validate_symbols(
+                frame.candles, supported_symbols, source=f"Frame at {frame.timestamp}"
+            )
 
         self._results = None
-        self._strategy: Strategy = strategy
+        self._supported_symbols = supported_symbols
+        self._strategy: MultiAssetStrategy = strategy
         self._broker = broker
-        self._plan = plan
+        self._allocation = allocation
+        self._sizing = sizing
         self._resolver = resolver
+        self._priority = priority
         self._data = validated_data
-        self._symbol = symbol
         self._initial_cash = broker.portfolio.cash
 
     def run(self) -> BacktestResult:
@@ -68,102 +84,139 @@ class BacktestEngine:
         return self._results
 
     def _calculate_results(self) -> BacktestResult:
-        """Iterate through candles, execute pending orders, and record results.
+        """Execute pending intents at each frame's open, then generate signals.
 
-        For each candle, an intent created by the previous candle's signal is
-        sized from the current portfolio and executed first at the current open.
-        The current candle is then added to the strategy's available history, a
-        new signal is generated, and the portfolio is valued at the current
-        close.
+        After execution, the strategy observes the current frame and the
+        portfolio is recorded at closing prices. Signals from the final frame
+        remain unexecuted because there is no following execution frame.
         """
-        order_executions = []
-        trades = []
+        order_executions_total = []
+        trades_total = []
         records = []
-        order_intent = None
+        order_intents = []
 
-        for candle in self._data:
-            if order_intent is not None:
-                order = self._create_order(order_intent, candle)
-                if order is not None:
-                    execution_result = self._execute_pending_order(order, candle)
-                    order_executions.append(execution_result)
-                    if execution_result.trade is not None:
-                        trades.append(execution_result.trade)
+        for frame in self._data:
 
-            signal = self._strategy.on_candle(candle)
-            order_intent = self._create_order_intent(candle.timestamp, signal)
-            records.append(self._create_record(candle, signal))
+            exec_results, trades = self._order_execution_results(
+                order_intents, frame
+            )
+            order_executions_total.extend(exec_results)
+            trades_total.extend(trades)
+
+            signal = self._strategy.on_frame(frame)
+            order_intents = self._create_order_intents(frame.timestamp, signal)
+            records.append(self._create_record(frame, signal))
 
         return BacktestResult(
-            symbol=self._symbol,
+            allocation=self._allocation,
             initial_cash=self._initial_cash,
             records=records,
-            trades=trades,
-            order_executions=order_executions
+            trades=trades_total,
+            order_executions=order_executions_total
         )
 
-    def _execute_pending_order(self, order: Order, candle: Candle) -> OrderExecutionResult:
-        """Execute a pending order at the current candle open.
-
-        Returns the broker's OrderExecutionResult. Insufficient cash or
-        position is captured in its status instead of stopping the backtest.
-        """
+    def _execute_pending_order(self, order: Order, frame: MarketFrame) -> OrderExecutionResult:
+        prices = frame.open_prices()
         return self._broker.execute(
             order=order,
-            prices={self._symbol: candle.open},
-            timestamp=candle.timestamp
+            prices=prices,
+            timestamp=frame.timestamp
         )
 
-    def _create_order(self, intent: OrderIntent, candle: Candle) -> Order | None:
-        """Convert a buy or sell signal into an execution-time order.
+    def _order_execution_results(
+        self,
+        intents: Sequence[OrderIntent],
+        frame: MarketFrame
+    ) -> tuple[Sequence[OrderExecutionResult], Sequence[Trade]]:
+        """Resolve and execute intents sequentially at this frame's open.
 
-        The quantity is calculated from the portfolio state immediately before
-        execution and the current candle's open. The simulation uses that same
-        opening reference price for execution. The order retains the intent's
-        signal timestamp and uses the current candle as its submission
-        timestamp.
+        Sort by sells before buys, ascending priority, then symbol. Refresh the
+        opening snapshot before every resolution: sale proceeds can fund later
+        buys, and earlier fills change cash, holdings, and equity after costs.
+        Consequently, later allocation budgets can depend on execution order.
+
+        Only orders submitted to the broker produce execution results. Intents
+        skipped by the resolver, including unaffordable fixed buys, are omitted.
         """
+
+        def intent_key(intent: OrderIntent) -> tuple[int, int, str]:
+            first = 0 if intent.side == Side.SELL else 1
+            second = self._priority(intent.symbol)
+            return first, second, intent.symbol
+
+        sorted_intents = sorted(
+            intents,
+            key=intent_key
+        )
+
+        trades = []
+        exec_results = []
+
+        for intent in sorted_intents:
+            order = self._create_order(intent, frame)
+            if order is not None:
+                exec_result = self._execute_pending_order(order, frame)
+                exec_results.append(exec_result)
+                if exec_result.trade is not None:
+                    trades.append(exec_result.trade)
+
+        return exec_results, trades
+
+    def _create_order(self, intent: OrderIntent, frame: MarketFrame) -> Order | None:
+        context = self._create_order_resolution_context(frame)
+
         return self._resolver.resolve(
             intent=intent,
-            context=self._create_context(candle.timestamp, candle.open)
+            context=context
         )
 
-    def _create_order_intent(self, timestamp: datetime, signal: Signal) -> OrderIntent | None:
-        if signal == Signal.BUY or signal == Signal.SELL:
-            side = side_from_signal(signal)
 
-            return OrderIntent(
-                symbol=self._symbol,
-                timestamp=timestamp,
-                side=side,
-                sizing_instruction=self._plan.instruction_for(side)
-            )
+    def _create_order_intents(self, timestamp: datetime, multi_asset_signal: MultiAssetSignal) -> Sequence[OrderIntent]:
+        validate_symbols(
+            multi_asset_signal.signals,
+            self._supported_symbols,
+            source=f"Strategy signal at {timestamp}",
+            require_all=False,
+        )
+        intents = []
 
-        elif signal != Signal.HOLD:
-            raise ValueError("Not a valid signal")
+        for symbol, signal in multi_asset_signal.signals.items():
 
-        return None
+            if signal == Signal.BUY or signal == Signal.SELL:
 
-    def _create_record(self, candle: Candle, signal: Signal) -> BacktestRecord:
+                side = side_from_signal(signal)
+                plan = self._sizing.plans[symbol]
+
+                intents.append(OrderIntent(
+                    symbol=symbol,
+                    timestamp=timestamp,
+                    side=side,
+                    sizing_instruction=plan.instruction_for(side)
+                ))
+
+            elif signal != Signal.HOLD:
+                raise ValueError("Not a valid signal")
+
+        return intents
+
+    def _create_record(self, frame: MarketFrame, signal: MultiAssetSignal) -> BacktestRecord:
         """Create a per-candle snapshot valued at the current close."""
         return BacktestRecord(
-            candle=candle,
+            frame=frame,
             generated_signal=signal,
-            snapshot=self._broker.portfolio.snapshot(prices={self._symbol: candle.close})
+            snapshot=self._broker.portfolio.snapshot(prices=frame.close_prices())
         )
 
-    def _create_context(self, timestamp: datetime, price: float) -> ResolutionContext:
-        current_quantity = self._broker.portfolio.position_quantity(self._symbol)
-        cash = self._broker.portfolio.cash
+    def _create_order_resolution_context(self, frame: MarketFrame) -> OrderResolutionContext:
+        """Value the current portfolio at frame opens after any earlier fills."""
+        reference_prices = frame.open_prices()
 
-        return ResolutionContext(
-            timestamp=timestamp,
-            reference_price=price,
-            cash=cash,
-            current_quantity=current_quantity,
-            portfolio_value=cash + current_quantity * price
+        return OrderResolutionContext(
+            timestamp=frame.timestamp,
+            reference_prices=reference_prices,
+            snapshot=self._broker.portfolio.snapshot(reference_prices),
+            allocation=self._allocation
         )
-
 
 def side_from_signal(signal: Signal) -> Side:
     """Map a buy or sell signal to its corresponding order side."""

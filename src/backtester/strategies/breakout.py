@@ -4,11 +4,11 @@ from typing import Callable
 from backtester.domain.market import Candle
 from backtester.domain.trading import Signal
 
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.strategies.calculators import RollingMaxCalculator, RollingMinCalculator
 
 
-class DonchianBreakoutStrategy(Strategy):
+class DonchianBreakoutStrategy(SingleAssetStrategy):
     """Generate breakout signals from highs and lows of prior candles.
 
     A close strictly above the highest high in the previous ``entry_window``

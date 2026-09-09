@@ -11,10 +11,11 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import PercentFormatter
 
 from backtester.engine.backtest_result import BacktestResult
+from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.visualization import comparison
 
 
-RESULT = BacktestResult("AAPL", 1000, [], [], [])
+RESULT = BacktestResult(AssetAllocation({"AAPL": 1.0}), 1000, [], [], [])
 
 
 def test_comparison_routes_both_results_and_formats_five_panels(
@@ -71,7 +72,7 @@ def test_comparison_routes_both_results_and_formats_five_panels(
 
 @pytest.mark.parametrize(
     ("benchmark", "message"),
-    [(replace(RESULT, symbol="MSFT"), "same symbol"),
+    [(replace(RESULT, allocation=AssetAllocation({"MSFT": 1.0})), "same symbol"),
      (replace(RESULT, initial_cash=2000), "same initial cash")],
 )
 def test_comparison_rejects_incompatible_results(benchmark, message) -> None:

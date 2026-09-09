@@ -3,13 +3,13 @@ from collections import deque
 from typing import Callable
 
 from backtester.domain.market import Candle
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.domain.trading import Signal
 from backtester.strategies.calculators import MovingAverageCalculator, SimpleMovingAverageCalculator, \
     ExponentialMovingAverageCalculator
 
 
-class MovingAverageCrossStrategy(Strategy):
+class MovingAverageCrossStrategy(SingleAssetStrategy):
     def __init__(self,
                  factory: Callable[[int], MovingAverageCalculator],
                  short_window_size: int = 20,
@@ -68,7 +68,7 @@ class ExponentialMovingAverageCrossStrategy(MovingAverageCrossStrategy):
                          long_window_size)
 
 
-class _MovingAverageCrossStrategy(Strategy):
+class _MovingAverageCrossStrategy(SingleAssetStrategy):
     """Trade when a short close-price average crosses a longer average.
 
     A cross above produces a buy and a cross below produces a sell. Signals

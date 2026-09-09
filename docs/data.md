@@ -35,7 +35,10 @@ price convention throughout.
 
 Use `--source csv` together with `--csv-path`. The path may identify one file
 or a directory. When given a directory, Strat Echo looks for
-`<SYMBOL>.csv`; for example, the symbol `SPY` maps to `SPY.csv`.
+`<SYMBOL>.csv`; for example, the symbol `SPY` maps to `SPY.csv`. 
+When given a directory and multiple symbols, Strat Echo loads one <SYMBOL>.csv file per symbol. 
+For example, AAPL and MSFT map to AAPL.csv and MSFT.csv. Their candles are combined 
+by timestamp, and all symbols must have identical timestamps within the selected period.
 
 A CSV file must contain one timestamp column named `date`, `timestamp`, or
 `datetime`, plus all five OHLCV columns:
@@ -74,6 +77,43 @@ ends the period today, while `end-csv` includes the selected symbol's final CSV
 candle. Both end-anchored modes start `--years` calendar years before their
 exclusive end boundary. Explicit date boundaries follow the common resolution
 rules documented in the [CLI reference](cli.md#common-options).
+
+## Combining assets into market frames
+
+Use `market_frames_from_candles` to combine already loaded candle sequences
+into the chronological `MarketFrame` sequence accepted by the multi-asset engine:
+
+```python
+from backtester.data.frames import market_frames_from_candles
+
+frames = market_frames_from_candles({"AAPL": aapl_candles, "MSFT": msft_candles})
+```
+
+Every symbol must have the same strictly increasing timestamp sequence. The
+function raises `ValueError` for duplicate or unordered timestamps, missing
+bars, extra bars, or different timestamps, including different start/end dates.
+It does not sort, fill, or discard bars to force alignment. Each frame retains
+the original candle for every supplied symbol.
+
+Dates absent from all assets, such as shared market holidays, are allowed;
+the function does not infer a trading calendar or expected bar frequency.
+Timezone-aware timestamps compare by instant; naive and aware timestamps cannot
+be mixed. An empty mapping or all-empty sequences returns `[]`; an empty series
+alongside a non-empty series is rejected. Different asset calendars require
+separate execution and valuation rules and are not supported here.
+
+The multi-asset engine uses allocation keys as its supported-symbol universe.
+Every frame and the sizing plan must contain exactly those symbols, including
+symbols with a zero allocation weight. Missing or extra symbols raise `ValueError`
+when the engine is constructed. Strategy signals may contain any subset of the
+universe; unsupported symbols raise `ValueError`, even for HOLD signals or on the
+final frame.
+
+`SimpleMultiAssetStrategy` requires a distinct single-asset strategy instance for
+each symbol so indicator history and other state remain independent. `SameForAll`
+calls its supplier once per symbol; the supplier must create a fresh instance.
+Reusing an instance raises `ValueError`. All required candles are checked before
+any child strategy processes a frame.
 
 ## Validation and normalization
 

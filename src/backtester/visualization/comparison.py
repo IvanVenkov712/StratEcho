@@ -28,7 +28,7 @@ def create_comparison_figure(
 ) -> Figure:
     """Return equity, drawdown, difference, cash, and quantity comparisons.
 
-    Results must share a symbol, initial cash, and strictly ordered timestamps.
+    Results must share allocations, initial cash, and strictly ordered timestamps.
     Equity differences are absolute cash amounts, not percentage returns.
     Drawdowns use each result's own running equity peak. Values are recorded
     end-of-period snapshots, including the simulated costs of each run.
@@ -37,8 +37,8 @@ def create_comparison_figure(
     strings; callers supply already calculated metrics. The caller owns saving,
     displaying, and closing the returned figure. Two empty results are allowed.
     """
-    if strategy.symbol != benchmark.symbol:
-        raise ValueError("Comparison results must have the same symbol.")
+    if strategy.allocation != benchmark.allocation:
+        raise ValueError("Comparison results must have the same symbols and allocations.")
     if strategy.initial_cash != benchmark.initial_cash:
         raise ValueError("Comparison results must have the same initial cash.")
     timestamps, differences = equity_difference_series(strategy, benchmark)
@@ -48,7 +48,8 @@ def create_comparison_figure(
         f"{timestamps[0]:%Y-%m-%d} through {timestamps[-1]:%Y-%m-%d}"
         if timestamps else "No observations"
     )
-    heading = f"{fill(heading, width=95)}\n{strategy.symbol} | {period}"
+    symbols = tuple(strategy.allocation.allocations)
+    heading = f"{fill(heading, width=95)}\n{', '.join(symbols)} | {period}"
     if subtitle:
         heading += "\n" + "\n".join(fill(line, width=110) for line in subtitle.splitlines())
 
@@ -67,7 +68,6 @@ def create_comparison_figure(
             (axes[0], equity_series, "Portfolio equity", "Cash units"),
             (axes[1], drawdown_series, "Drawdown", "Drawdown (%)"),
             (axes[3], cash_series, "Cash", "Cash units"),
-            (axes[4], position_quantity_series, "Position quantity", "Shares"),
         )
         for ax, transformer, title, ylabel in panels:
             for result, label, color, linestyle in (
@@ -79,6 +79,19 @@ def create_comparison_figure(
             ax.set_title(title)
             ax.set_ylabel(ylabel)
             ax.legend(loc="best")
+
+        for index, symbol in enumerate(symbols):
+            for result, label, linestyle in (
+                (strategy, "Strategy", "-"), (benchmark, "Benchmark", "--"),
+            ):
+                dates, values = position_quantity_series(result, symbol)
+                color = f"C{index % 10}"
+                if len(symbols) == 1:
+                    color = "tab:blue" if label == "Strategy" else "tab:orange"
+                axes[4].plot(dates, values, label=f"{label} {symbol}", color=color, linestyle=linestyle)
+        axes[4].set_title("Position quantity")
+        axes[4].set_ylabel("Shares")
+        axes[4].legend(loc="best")
 
         axes[1].yaxis.set_major_formatter(PercentFormatter(xmax=1.0))
         axes[4].yaxis.set_major_locator(MaxNLocator(integer=True))

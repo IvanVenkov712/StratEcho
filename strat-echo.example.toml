@@ -3,6 +3,10 @@
 
 [backtest]
 symbol = "SPY"
+# For multiple assets, replace symbol above with:
+# symbols = ["SPY", "QQQ"]
+# allocations = { SPY = 0.6, QQQ = 0.4 } # Omit entirely for equal weights.
+# priorities = { QQQ = -1 } # Others default to 0; lower values first within each side.
 years = 5
 # Dates must be quoted because the CLI expects the YYYY-MM-DD string format.
 # start = "2021-01-01"
@@ -10,6 +14,8 @@ years = 5
 
 source = "csv"
 csv_path = "data/SPY.csv"
+# Multi-symbol runs need a directory of SYMBOL.csv files (csv_path = "data")
+# or one combined CSV with a symbol column and matching timestamps per asset.
 # With no explicit dates, start at the CSV's first candle and add `years`.
 # Use "end-today" to end today, or "end-csv" to end at the final CSV
 # candle; both alternatives subtract `years` to derive the start.
@@ -21,7 +27,7 @@ initial_capital = 10000.0
 sizing = "percent"
 buy_percent = 0.5
 sell_percent = 1.0
-# Optionally wrap buy quantity resolution with a cash reserve. Affordability
+# Optionally leave a fraction of each allocation-gap buy budget unspent. Affordability
 # still uses the configured commission and slippage models.
 buffer_rate = 0.01
 # For fixed sizing, replace sizing and the two percentage settings with:
@@ -48,6 +54,13 @@ mean_threshold = 0.95
 # Donchian breakout defaults; used when strategy = "donchian-breakout".
 entry_window = 20
 exit_window = 10
+
+# Individual sizing for the multi-symbol example; CLI sizing overrides apply
+# to every symbol. Changing mode discards inherited parameters of the old mode.
+# [backtest.sizing_by_symbol.QQQ]
+# sizing = "fixed"
+# buy_size = 2
+# sell_size = 2
 
 [compare]
 benchmark = "buy-and-hold"

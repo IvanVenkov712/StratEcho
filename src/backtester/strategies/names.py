@@ -1,6 +1,6 @@
 """Human-readable names for the concrete strategy types."""
 
-from backtester.strategies.base import Strategy
+from backtester.strategies.base import SingleAssetStrategy
 from backtester.strategies.breakout import DonchianBreakoutStrategy
 from backtester.strategies.buy_n_hold import BuyAndHoldStrategy
 from backtester.strategies.moving_average import (
@@ -18,7 +18,7 @@ from backtester.strategies.rsi_strategies import (
 )
 
 
-STRATEGY_NAMES: dict[type[Strategy], str] = {
+STRATEGY_NAMES: dict[type[SingleAssetStrategy], str] = {
     BuyAndHoldStrategy: "Buy and Hold",
     SimpleMovingAverageCrossStrategy: "Simple Moving Average Crossover",
     ExponentialMovingAverageCrossStrategy: "Exponential Moving Average Crossover",
