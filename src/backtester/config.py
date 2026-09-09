@@ -9,8 +9,10 @@ from typing import Mapping, TypeAlias
 
 DEFAULT_CONFIG_PATH = Path("strat-echo.toml")
 
-ConfigValue: TypeAlias = str | int | float
+ConfigValue: TypeAlias = str | int | float | list[str] | dict[str, "ConfigValue"]
 ConfigDocument: TypeAlias = dict[str, dict[str, ConfigValue]]
+
+SIZING_OPTIONS = {"sizing", "buy_size", "sell_size", "buy_percent", "sell_percent"}
 
 _STRING_OPTIONS = {
     "symbol",
@@ -50,6 +52,7 @@ _NUMBER_OPTIONS = {
 }
 _BACKTEST_OPTIONS = (
     _STRING_OPTIONS | _INTEGER_OPTIONS | _NUMBER_OPTIONS
+    | {"symbols", "allocations", "priorities", "sizing_by_symbol"}
 ) - {"benchmark"}
 _SECTION_OPTIONS = {
     "backtest": _BACKTEST_OPTIONS,
@@ -110,6 +113,8 @@ def config_to_cli_arguments(
     """
 
     options = dict(config.get("backtest", {}))
+    # Symbol-specific sizing is resolved separately after the universe is known.
+    options.pop("sizing_by_symbol", None)
     if command == "compare":
         for name in _BACKTEST_ONLY_OPTIONS:
             options.pop(name, None)
@@ -126,9 +131,24 @@ def config_to_cli_arguments(
                 for dependency in dependencies:
                     options.pop(dependency, None)
 
+    overrides = cli_overrides or {}
+    if "symbol" in overrides or "symbols" in overrides:
+        options.pop("symbol", None)
+        options.pop("symbols", None)
+    for option, flag in (("allocations", "allocation"), ("priorities", "priority")):
+        if flag in overrides:
+            options.pop(option, None)
+
     arguments: list[str] = []
     for name, value in options.items():
-        arguments.extend((f"--{name.replace('_', '-')}", str(value)))
+        if name == "symbols":
+            arguments.extend(("--symbols", *value))
+        elif name in {"allocations", "priorities"}:
+            flag = "--allocation" if name == "allocations" else "--priority"
+            for symbol, setting in value.items():
+                arguments.extend((flag, f"{symbol}={setting}"))
+        else:
+            arguments.extend((f"--{name.replace('_', '-')}", str(value)))
 
     return arguments
 
@@ -157,6 +177,8 @@ def _validate_document(document: dict[str, object], path: Path) -> ConfigDocumen
             name: _validate_value(section_name, name, value, path)
             for name, value in raw_section.items()
         }
+        if "symbol" in raw_section and "symbols" in raw_section:
+            raise ConfigError("Use only one of 'symbol' and 'symbols' in [backtest].")
 
     return validated
 
@@ -167,6 +189,29 @@ def _validate_value(
     value: object,
     path: Path,
 ) -> ConfigValue:
+    if name == "symbols":
+        if not isinstance(value, list) or not value or any(type(item) is not str for item in value):
+            raise ConfigError(f"Option 'symbols' in [{section}] must be a non-empty array of strings.")
+        return value
+    if name in {"allocations", "priorities", "sizing_by_symbol"}:
+        if not isinstance(value, dict):
+            raise ConfigError(f"Option {name!r} in [{section}] must be a table.")
+        if name == "allocations" and not value:
+            raise ConfigError("An allocations table must contain a weight for every symbol.")
+        for symbol, setting in value.items():
+            if name == "sizing_by_symbol":
+                if not isinstance(setting, dict) or setting.keys() - SIZING_OPTIONS:
+                    raise ConfigError(
+                        f"Sizing for {symbol!r} must be a table containing only: "
+                        f"{', '.join(sorted(SIZING_OPTIONS))}."
+                    )
+                for key, item in setting.items():
+                    _validate_value(f"{section}.{name}.{symbol}", key, item, path)
+            elif name == "priorities" and type(setting) is not int:
+                raise ConfigError(f"Priority for {symbol!r} must be an integer.")
+            elif name == "allocations" and type(setting) not in (int, float):
+                raise ConfigError(f"Allocation for {symbol!r} must be a number.")
+        return value
     if name in _STRING_OPTIONS:
         expected = "a string"
         valid = type(value) is str
