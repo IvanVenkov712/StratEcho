@@ -7,20 +7,19 @@ from datetime import date, timedelta
 from typing import Sequence, TextIO
 
 from backtester.cli import factories, reporting
+from backtester.data.frames import market_frames_from_candles
 from backtester.data.loader import (
     CSVDataSource,
     DataSource,
     candles_from_dataframe,
 )
-from backtester.domain.market import Candle
+from backtester.domain.market import MarketFrame
 from backtester.engine.backtest import BacktestEngine
 from backtester.engine.backtest_result import BacktestResult
 from backtester.execution.broker import Broker
-from backtester.execution.costs import CommissionModel, ExecutionModel
 from backtester.metrics.benchmark_comparison import get_differences
 from backtester.portfolio.portfolio import Portfolio
-from backtester.sizing.policy import SizingPlan
-from backtester.strategies.base import SingleAssetStrategy
+from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.visualization.export import (
     export_backtest_dashboard,
     export_comparison_dashboard,
@@ -31,8 +30,8 @@ def run_backtest_command(args: argparse.Namespace, output: TextIO) -> None:
     """Run one configured backtest and print its parameters and results."""
     data_source = factories.create_data_source(args)
     start, end = _resolve_command_date_range(args, data_source)
-    strategy = factories.create_strategy(args.strategy, args)
-    result = _run_backtest(args, data_source, strategy, start, end)
+    frames = _load_market_frames(args, data_source, start, end)
+    result = _run_backtest_with_frames(args, frames)
     metrics = factories.create_performance_analyzer().calculate_metrics(result)
     strategy_description = reporting.describe_strategy(args.strategy, args)
 
@@ -41,7 +40,9 @@ def run_backtest_command(args: argparse.Namespace, output: TextIO) -> None:
         title="Backtest parameters",
         strategy_name=strategy_description,
         benchmark_name=None,
-        symbol=args.symbol,
+        symbol=", ".join(args.symbols),
+        allocations=args.allocations,
+        priorities=args.priorities,
         start=start,
         end=end,
         years=args.years,
@@ -51,7 +52,7 @@ def run_backtest_command(args: argparse.Namespace, output: TextIO) -> None:
         result=result,
         data_source_name=reporting.describe_data_source(args),
         initial_capital=args.initial_capital,
-        sizing_name=reporting.describe_sizing(args),
+        sizing_name=reporting.describe_universe_sizing(args),
         commission_name=reporting.describe_commission(args),
         slippage_name=reporting.describe_slippage(args),
     )
@@ -62,7 +63,7 @@ def run_backtest_command(args: argparse.Namespace, output: TextIO) -> None:
         chart_path = export_backtest_dashboard(
             result,
             args.chart_path,
-            title=f"{strategy_description} - {result.symbol}",
+            title=f"{strategy_description} - {', '.join(args.symbols)}",
         )
         print(file=output)
         print(f"Chart saved to: {chart_path}", file=output)
@@ -72,33 +73,9 @@ def run_compare_command(args: argparse.Namespace, output: TextIO) -> None:
     """Run a strategy and benchmark over identical data and print differences."""
     data_source = factories.create_data_source(args)
     start, end = _resolve_command_date_range(args, data_source)
-    data = data_source.load(args.symbol, start, end)
-    if data is None or data.empty:
-        raise ValueError("No market data was returned for the selected parameters.")
-
-    candles = candles_from_dataframe(data)
-    _validate_backtest_data(candles)
-
-    strategy_result = _run_backtest_with_candles(
-        strategy=factories.create_strategy(args.strategy, args),
-        candles=candles,
-        symbol=args.symbol,
-        initial_capital=args.initial_capital,
-        sizing_plan=factories.create_sizing_plan(args),
-        execution_model=factories.create_execution_model(args),
-        commission_model=factories.create_commission_model(args),
-        buffer_rate=args.buffer_rate,
-    )
-    benchmark_result = _run_backtest_with_candles(
-        strategy=factories.create_strategy(args.benchmark, args),
-        candles=candles,
-        symbol=args.symbol,
-        initial_capital=args.initial_capital,
-        sizing_plan=factories.create_all_in_all_out_sizing_plan(),
-        execution_model=factories.create_execution_model(args),
-        commission_model=factories.create_commission_model(args),
-        buffer_rate=args.buffer_rate,
-    )
+    frames = _load_market_frames(args, data_source, start, end)
+    strategy_result = _run_backtest_with_frames(args, frames)
+    benchmark_result = _run_backtest_with_frames(args, frames, benchmark=True)
 
     analyzer = factories.create_performance_analyzer()
     strategy_metrics = analyzer.calculate_metrics(strategy_result)
@@ -110,7 +87,9 @@ def run_compare_command(args: argparse.Namespace, output: TextIO) -> None:
         title="Benchmark comparison parameters",
         strategy_name=reporting.describe_strategy(args.strategy, args),
         benchmark_name=reporting.describe_strategy(args.benchmark, args),
-        symbol=args.symbol,
+        symbol=", ".join(args.symbols),
+        allocations=args.allocations,
+        priorities=args.priorities,
         start=start,
         end=end,
         years=args.years,
@@ -120,7 +99,7 @@ def run_compare_command(args: argparse.Namespace, output: TextIO) -> None:
         result=strategy_result,
         data_source_name=reporting.describe_data_source(args),
         initial_capital=args.initial_capital,
-        sizing_name=reporting.describe_sizing(args),
+        sizing_name=reporting.describe_universe_sizing(args),
         benchmark_sizing_name=reporting.describe_all_in_all_out_sizing(args),
         commission_name=reporting.describe_commission(args),
         slippage_name=reporting.describe_slippage(args),
@@ -159,7 +138,7 @@ def run_compare_command(args: argparse.Namespace, output: TextIO) -> None:
             strategy_name=reporting.describe_strategy(args.strategy, args),
             benchmark_name=reporting.describe_strategy(args.benchmark, args),
             subtitle=(
-                f"Strategy sizing: {reporting.describe_sizing(args)}\n"
+                f"Strategy sizing: {reporting.describe_universe_sizing(args)}\n"
                 f"Benchmark sizing: {reporting.describe_all_in_all_out_sizing(args)}"
             ),
             metric_rows=metric_rows,
@@ -168,57 +147,53 @@ def run_compare_command(args: argparse.Namespace, output: TextIO) -> None:
         print(f"Chart saved to: {chart_path}", file=output)
 
 
-def _run_backtest(
+def _load_market_frames(
     args: argparse.Namespace,
     data_source: DataSource,
-    strategy: SingleAssetStrategy,
     start: str,
     end: str,
+) -> list[MarketFrame]:
+    """Load each symbol once and require exactly aligned, unfilled candles."""
+    candles_by_symbol = {}
+    for symbol in args.symbols:
+        data = data_source.load(symbol, start, end)
+        if data is None or data.empty:
+            raise ValueError(f"No market data was returned for symbol: {symbol}.")
+        candles_by_symbol[symbol] = candles_from_dataframe(data)
+    frames = market_frames_from_candles(candles_by_symbol)
+    if len(frames) < 2:
+        raise ValueError("At least two candles are required to calculate metrics.")
+    return frames
+
+
+def _run_backtest_with_frames(
+    args: argparse.Namespace,
+    frames: Sequence[MarketFrame],
+    *,
+    benchmark: bool = False,
 ) -> BacktestResult:
-    data = data_source.load(args.symbol, start, end)
-    if data is None or data.empty:
-        raise ValueError("No market data was returned for the selected parameters.")
-
-    candles = candles_from_dataframe(data)
-    _validate_backtest_data(candles)
-    return _run_backtest_with_candles(
-        strategy=strategy,
-        candles=candles,
-        symbol=args.symbol,
-        initial_capital=args.initial_capital,
-        sizing_plan=factories.create_sizing_plan(args),
-        execution_model=factories.create_execution_model(args),
-        commission_model=factories.create_commission_model(args),
-        buffer_rate=args.buffer_rate,
-    )
-
-
-def _run_backtest_with_candles(
-    strategy: SingleAssetStrategy,
-    candles: Sequence[Candle],
-    symbol: str,
-    initial_capital: float,
-    sizing_plan: SizingPlan,
-    execution_model: ExecutionModel,
-    commission_model: CommissionModel,
-    buffer_rate: float | None,
-) -> BacktestResult:
+    """Wire one independent run over the shared universe and market frames."""
+    execution_model = factories.create_execution_model(args)
+    commission_model = factories.create_commission_model(args)
     broker = Broker(
-        Portfolio(cash=initial_capital),
+        Portfolio(cash=args.initial_capital),
         execution_model=execution_model,
         commission_model=commission_model,
     )
     return BacktestEngine(
-        strategy=strategy,
+        strategy=factories.create_multi_asset_strategy(
+            args.benchmark if benchmark else args.strategy, args,
+        ),
         broker=broker,
-        allocation=sizing_plan,
+        allocation=AssetAllocation(args.allocations),
+        sizing=factories.create_multi_asset_sizing_plan(args, benchmark=benchmark),
+        priority=args.priorities.__getitem__,
         resolver=factories.create_order_resolver(
             execution_model=execution_model,
             commission_model=commission_model,
-            buffer_rate=buffer_rate,
+            buffer_rate=args.buffer_rate,
         ),
-        data=candles,
-        symbol=symbol,
+        data=frames,
     ).run()
 
 
@@ -283,9 +258,9 @@ def _resolve_command_date_range(
         and isinstance(data_source, CSVDataSource)
     ):
         if args.csv_period_anchor == "start-csv":
-            source_start = data_source.first_available_date(args.symbol)
+            source_start = min(data_source.first_available_date(symbol) for symbol in args.symbols)
         elif args.csv_period_anchor == "end-csv":
-            last_date = data_source.last_available_date(args.symbol)
+            last_date = max(data_source.last_available_date(symbol) for symbol in args.symbols)
             exclusive_end = last_date + timedelta(days=1)
             return resolve_date_range(
                 args.start,
@@ -318,8 +293,3 @@ def _reported_csv_period_anchor(args: argparse.Namespace) -> str | None:
 
 def _csv_period_anchor_is_applied(args: argparse.Namespace) -> bool:
     return args.source == "csv" and args.start is None and args.end is None
-
-
-def _validate_backtest_data(candles: Sequence[Candle]) -> None:
-    if len(candles) < 2:
-        raise ValueError("At least two candles are required to calculate metrics.")
