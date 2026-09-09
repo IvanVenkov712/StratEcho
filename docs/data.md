@@ -35,7 +35,10 @@ price convention throughout.
 
 Use `--source csv` together with `--csv-path`. The path may identify one file
 or a directory. When given a directory, Strat Echo looks for
-`<SYMBOL>.csv`; for example, the symbol `SPY` maps to `SPY.csv`.
+`<SYMBOL>.csv`; for example, the symbol `SPY` maps to `SPY.csv`. 
+When given a directory and multiple symbols, Strat Echo loads one <SYMBOL>.csv file per symbol. 
+For example, AAPL and MSFT map to AAPL.csv and MSFT.csv. Their candles are combined 
+by timestamp, and all symbols must have identical timestamps within the selected period.
 
 A CSV file must contain one timestamp column named `date`, `timestamp`, or
 `datetime`, plus all five OHLCV columns:
