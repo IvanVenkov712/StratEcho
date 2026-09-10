@@ -133,6 +133,28 @@ class OrderExecutionResult:
         if self.status is OrderExecutionStatus.SUCCESS and self.trade is None:
             raise ValueError("Successful order execution should lead to a trade")
 
+
+@dataclass(frozen=True)
+class TargetAllocation:
+    timestamp: datetime
+    weights: Mapping[str, float]
+
+    def __post_init__(self):
+        _validate_timestamp(self.timestamp)
+        _validate_weights(self.weights)
+
+class PendingDecision:
+    pass
+
+@dataclass(frozen=True)
+class SignalDecision(PendingDecision):
+    intents: tuple[OrderIntent, ...]
+
+
+@dataclass(frozen=True)
+class RebalanceDecision(PendingDecision):
+    target: TargetAllocation
+
 @dataclass(frozen=True)
 class PortfolioSnapshot:
     """Point-in-time cash, total equity, and detached position quantities."""
@@ -187,3 +209,10 @@ def _validate_commission(commission: float) -> None:
 def _validate_timestamp(timestamp: datetime) -> None:
     if not isinstance(timestamp, datetime):
         raise ValueError("Timestamp must be a datetime.")
+
+def _validate_weights(weights: Mapping[str, float]):
+    if any(not 0 <= weight <= 1 for weight in weights.values()):
+        raise ValueError("All weights must be in [0, 1]")
+
+    if sum(weight for weight in weights.values()) > 1:
+        raise ValueError("Weights sum must be <= 1")
