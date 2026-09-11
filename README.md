@@ -291,6 +291,9 @@ limit, it displays the rejection count without listing every order.
 
 ## Documentation
 
+- [Portfolio rebalancing](docs/rebalancing.md): equal and preset weights,
+  full and threshold planners, whole-share sizing, and execution assumptions.
+
 - [TOML configuration](docs/configuration.md): precedence, paths, complete file
   structure, supported keys, and validation
 - [CLI reference](docs/cli.md): commands, parameters, sizing, and execution-cost

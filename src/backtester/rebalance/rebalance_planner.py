@@ -8,6 +8,12 @@ from backtester.domain.trading import TargetAllocation, PortfolioSnapshot, Order
 
 @dataclass(frozen=True)
 class RebalanceContext:
+    """Previously decided targets and a snapshot valued at execution prices.
+
+    The engine supplies the next frame's opening prices. Planners preserve
+    decision_timestamp on intents and do not recalculate strategy targets.
+    """
+
     execution_timestamp: datetime
     decision_timestamp: datetime
     target: TargetAllocation
@@ -15,6 +21,7 @@ class RebalanceContext:
     prices: Mapping[str, float]
 
 class RebalancePlanner(ABC):
+    """Translate target weights into intents without changing the portfolio."""
 
     def __init__(
             self,
