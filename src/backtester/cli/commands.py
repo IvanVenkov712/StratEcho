@@ -17,9 +17,12 @@ from backtester.domain.market import MarketFrame
 from backtester.engine.backtest import BacktestEngine
 from backtester.engine.backtest_result import BacktestResult
 from backtester.execution.broker import Broker
+from backtester.execution.decision_execution.intent_executor import IntentExecutor
+from backtester.execution.decision_execution.signal_decision_executor import SignalDecisionExecutor
 from backtester.metrics.benchmark_comparison import get_differences
 from backtester.portfolio.portfolio import Portfolio
 from backtester.sizing.asset_allocation import AssetAllocation
+from backtester.strategies.portfolio_strategies.portfolio_strategy import MultiAssetPortfolioStrategy
 from backtester.visualization.export import (
     export_backtest_dashboard,
     export_comparison_dashboard,
@@ -180,19 +183,25 @@ def _run_backtest_with_frames(
         execution_model=execution_model,
         commission_model=commission_model,
     )
-    return BacktestEngine(
-        strategy=factories.create_multi_asset_strategy(
-            args.benchmark if benchmark else args.strategy, args,
-        ),
+    intent_executor = IntentExecutor(
         broker=broker,
-        allocation=AssetAllocation(args.allocations),
-        sizing=factories.create_multi_asset_sizing_plan(args, benchmark=benchmark),
         priority=args.priorities.__getitem__,
         resolver=factories.create_order_resolver(
             execution_model=execution_model,
             commission_model=commission_model,
             buffer_rate=args.buffer_rate,
         ),
+    )
+    decision_executor = SignalDecisionExecutor(
+        intent_executor=intent_executor,
+        allocation=AssetAllocation(args.allocations),
+        sizing=factories.create_multi_asset_sizing_plan(args, benchmark=benchmark),
+    )
+    return BacktestEngine(
+        strategy=MultiAssetPortfolioStrategy(factories.create_multi_asset_strategy(
+            args.benchmark if benchmark else args.strategy, args,
+        )),
+        decision_executor=decision_executor,
         data=frames,
     ).run()
 

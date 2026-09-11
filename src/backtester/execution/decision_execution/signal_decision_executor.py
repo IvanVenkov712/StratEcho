@@ -1,5 +1,6 @@
 from datetime import datetime
-from typing import Sequence
+from collections.abc import Collection
+from typing import Sequence, cast
 
 from backtester.data.validation import validate_symbols
 from backtester.domain.trading import PendingDecision, SignalDecision, OrderIntent, Side, MultiAssetSignal, \
@@ -25,16 +26,33 @@ class SignalDecisionExecutor(DecisionExecutor):
         self._sizing = sizing
         self._supported_symbols = supported_symbols
 
+    def validate_universe(self, symbols: Collection[str], *, source: str = "Market data") -> None:
+        """Require prices for exactly the configured allocation symbols."""
+        validate_symbols(symbols, self._supported_symbols, source=source)
+
+    def validate_decision(self, decision: PendingDecision, symbols: Collection[str]) -> None:
+        """Validate signal type, universe, and values before any order is created."""
+        if not isinstance(decision, SignalDecision):
+            raise ValueError("SignalDecision is expected")
+        self.validate_universe(symbols)
+        validate_symbols(
+            decision.signal.signals,
+            self._supported_symbols,
+            source=f"Strategy signal at {decision.timestamp}",
+            require_all=False,
+        )
+        if any(not isinstance(signal, Signal) for signal in decision.signal.signals.values()):
+            raise ValueError("Not a valid signal")
+
     def execute(
             self,
             pending_decision: PendingDecision,
             timestamp: datetime,
             prices: dict[str, float]
     ) -> DecisionExecutionResult:
-        if not isinstance(pending_decision, SignalDecision):
-            raise ValueError("SignalDecision is expected")
+        self.validate_decision(pending_decision, prices.keys())
 
-        signal_decision: SignalDecision = pending_decision
+        signal_decision = cast(SignalDecision, pending_decision)
         intents = self._create_order_intents(signal_decision.timestamp, signal_decision.signal)
         return self._intent_executor.execute(intents, timestamp, prices, self._allocation)
 
@@ -43,12 +61,6 @@ class SignalDecisionExecutor(DecisionExecutor):
             multi_asset_signal: MultiAssetSignal
     ) -> Sequence[OrderIntent]:
 
-        validate_symbols(
-            multi_asset_signal.signals,
-            self._supported_symbols,
-            source=f"Strategy signal at {timestamp}",
-            require_all=False,
-        )
         intents = []
 
         for symbol, signal in multi_asset_signal.signals.items():

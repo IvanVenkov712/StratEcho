@@ -9,11 +9,14 @@ from backtester.domain.trading import (
     TargetAllocation,
 )
 from backtester.execution.broker import Broker
+from backtester.domain.market import Candle, MarketFrame
+from backtester.engine.backtest import BacktestEngine
 from backtester.execution.decision_execution.decision_executor import DecisionExecutionResult
 from backtester.execution.decision_execution.intent_executor import IntentExecutor
 from backtester.execution.decision_execution.rebalance_decision_executor import RebalanceDecisionExecutor
 from backtester.rebalance.rebalance_planner import RebalanceContext, RebalancePlanner
 from backtester.sizing.asset_allocation import AssetAllocation
+from backtester.strategies.portfolio_strategies.portfolio_strategy import PortfolioStrategy
 
 
 DECISION_TIME = datetime(2026, 1, 1)
@@ -48,7 +51,8 @@ def test_rebalance_allocation_includes_holdings_and_preserves_explicit_targets(
     intent_executor = Mock(spec=IntentExecutor)
     expected_result = DecisionExecutionResult([], [])
     intent_executor.execute.return_value = expected_result
-    executor = RebalanceDecisionExecutor(broker, planner, intent_executor)
+    intent_executor.broker = broker
+    executor = RebalanceDecisionExecutor(planner, intent_executor)
     decision = RebalanceDecision(DECISION_TIME, TargetAllocation(target_weights))
 
     result = executor.execute(decision, EXECUTION_TIME, prices)
@@ -81,7 +85,8 @@ def test_rebalance_rejects_wrong_decision_type_before_calling_dependencies(
     broker = Mock(spec=Broker)
     planner = Mock(spec=RebalancePlanner)
     intent_executor = Mock(spec=IntentExecutor)
-    executor = RebalanceDecisionExecutor(broker, planner, intent_executor)
+    intent_executor.broker = broker
+    executor = RebalanceDecisionExecutor(planner, intent_executor)
 
     with pytest.raises(ValueError, match="RebalanceDecision is expected"):
         executor.execute(decision, EXECUTION_TIME, {})
@@ -98,7 +103,8 @@ def test_rebalance_delegates_empty_plan_for_existing_holdings() -> None:
     planner.get_intents.return_value = []
     intent_executor = Mock(spec=IntentExecutor)
     intent_executor.execute.return_value = DecisionExecutionResult([], [])
-    executor = RebalanceDecisionExecutor(broker, planner, intent_executor)
+    intent_executor.broker = broker
+    executor = RebalanceDecisionExecutor(planner, intent_executor)
     decision = RebalanceDecision(DECISION_TIME, TargetAllocation({"A": 1.0}))
 
     result = executor.execute(decision, EXECUTION_TIME, {"A": 100.0})
@@ -123,7 +129,8 @@ def test_rebalance_propagates_dependency_errors(failing_dependency: str) -> None
         "intent_executor": intent_executor.execute,
     }[failing_dependency]
     dependency.side_effect = error
-    executor = RebalanceDecisionExecutor(broker, planner, intent_executor)
+    intent_executor.broker = broker
+    executor = RebalanceDecisionExecutor(planner, intent_executor)
     decision = RebalanceDecision(DECISION_TIME, TargetAllocation({}))
 
     with pytest.raises(ValueError) as caught:
@@ -134,3 +141,57 @@ def test_rebalance_propagates_dependency_errors(failing_dependency: str) -> None
     assert planner.get_intents.call_count == (0 if failing_dependency == "snapshot" else 1)
     assert intent_executor.execute.call_count == (1 if failing_dependency == "intent_executor" else 0)
     broker.execute.assert_not_called()
+
+
+@pytest.mark.parametrize("weights", [{"C": 1.0}, {"A": 0.5, "C": 0.0}])
+def test_rebalance_rejects_unpriced_targets_before_planning(weights: dict[str, float]) -> None:
+    planner = Mock(spec=RebalancePlanner)
+    intent_executor = Mock(spec=IntentExecutor)
+    executor = RebalanceDecisionExecutor(planner, intent_executor)
+    decision = RebalanceDecision(DECISION_TIME, TargetAllocation(weights))
+
+    with pytest.raises(ValueError, match="Rebalance target.*unsupported=.*C"):
+        executor.execute(decision, EXECUTION_TIME, {"A": 100.0, "B": 100.0})
+
+    planner.get_intents.assert_not_called()
+    intent_executor.execute.assert_not_called()
+    intent_executor.broker.portfolio.snapshot.assert_not_called()
+
+
+@pytest.mark.parametrize("weights", [{}, {"A": 1.0}, {"A": 0.25, "B": 0.5}])
+def test_validating_rebalance_accepts_partial_targets_without_planning(weights: dict[str, float]) -> None:
+    planner = Mock(spec=RebalancePlanner)
+    intent_executor = Mock(spec=IntentExecutor)
+    executor = RebalanceDecisionExecutor(planner, intent_executor)
+
+    executor.validate_decision(RebalanceDecision(DECISION_TIME, TargetAllocation(weights)), ("A", "B"))
+
+    planner.get_intents.assert_not_called()
+    intent_executor.execute.assert_not_called()
+    intent_executor.broker.portfolio.snapshot.assert_not_called()
+
+
+@pytest.mark.parametrize("invalid", [False, True])
+def test_engine_validates_final_rebalance_without_planning_orders(invalid: bool) -> None:
+    frame = MarketFrame(DECISION_TIME, {"A": Candle(DECISION_TIME, 100, 100, 100, 100, 10)})
+    strategy = Mock(spec=PortfolioStrategy)
+    decision = RebalanceDecision(DECISION_TIME, TargetAllocation({"C" if invalid else "A": 1.0}))
+    strategy.on_frame.return_value = decision
+    planner = Mock(spec=RebalancePlanner)
+    intent_executor = Mock(spec=IntentExecutor)
+    intent_executor.broker.portfolio.cash = 1000
+    intent_executor.broker.portfolio.snapshot.return_value = PortfolioSnapshot(1000, 1000, {})
+    executor = RebalanceDecisionExecutor(planner, intent_executor)
+    engine = BacktestEngine(strategy, executor, [frame])
+
+    if invalid:
+        with pytest.raises(ValueError, match="Rebalance target.*unsupported=.*C"):
+            engine.run()
+    else:
+        result = engine.run()
+        assert result.symbols == ("A",)
+        assert result.records[0].generated_decision == decision
+        assert result.trades == result.order_executions == []
+
+    planner.get_intents.assert_not_called()
+    intent_executor.execute.assert_not_called()

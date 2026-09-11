@@ -5,7 +5,7 @@ from math import isclose
 from typing import Sequence
 
 from backtester.domain.market import Candle
-from backtester.domain.trading import Side, Signal
+from backtester.domain.trading import Side, Signal, SignalDecision
 from backtester.engine.backtest_result import BacktestResult
 
 
@@ -140,13 +140,15 @@ def signal_marker_series(
 
     The closing price locates the signal where it became known. It is not an
     execution price; a resulting trade normally executes at the next candle's
-    open according to the backtest engine's timing model.
+    open according to the backtest engine's timing model. Rebalance decisions
+    have no buy/sell/hold signals and do not produce signal markers.
     """
     symbol = _resolve_symbol(result, symbol)
     matching_records = [
         record
         for record in result.records
-        if record.generated_decision.signals.get(symbol) == signal
+        if isinstance(record.generated_decision, SignalDecision)
+        and record.generated_decision.signal.signals.get(symbol) == signal
     ]
 
     return (
@@ -157,9 +159,9 @@ def signal_marker_series(
 
 def _resolve_symbol(result: BacktestResult, symbol: str | None) -> str:
     if symbol is None:
-        if len(result.allocation.allocations) != 1:
+        if len(result.symbols) != 1:
             raise ValueError("Specify a symbol for a multi-asset series.")
-        return next(iter(result.allocation.allocations))
-    if symbol not in result.allocation.allocations:
+        return next(iter(result.symbols))
+    if symbol not in result.symbols:
         raise ValueError(f"Unknown result symbol: {symbol}.")
     return symbol

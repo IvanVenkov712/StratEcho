@@ -215,10 +215,11 @@ bias:
 
 1. The strategy receives candle `T` only after all earlier candles have been
    processed; no future candle is supplied.
-2. A signal generated from candle `T`'s close creates an order intent without a
-   quantity.
-3. At candle `T+1` open, the position size is calculated using the current
-   portfolio and the opening price supplied by the selected data source.
+2. The strategy observes the closing portfolio snapshot and generates a
+   decision, which is validated immediately without executing orders.
+3. At candle `T+1` open, the decision executor creates order intents and sizes
+   them using the current portfolio and opening prices. For signal strategies,
+   each buy/sell intent carries its configured sizing instruction.
 4. Slippage adjusts the fill price against the trader: BUY fills move up and
    SELL fills move down.
 5. Commission is calculated from the resulting fill and deducted from cash.
@@ -229,19 +230,30 @@ An executable order preserves both points in the lifecycle:
 `submitted_timestamp` identifies candle `T+1`, when the intent was sized and
 submitted for execution. A successful trade's timestamp records its fill time.
 
-A signal from the final candle remains unexecuted because the data contains no
-`T+1` open. See the [Strategy reference](docs/strategies.md) for each
+A decision from the final candle is validated but remains unexecuted because
+the data contains no `T+1` open. See the [Strategy reference](docs/strategies.md) for each
 strategy's warm-up and signal rules under this timing model.
+
+The Python engine takes `strategy`, `decision_executor`, and `data`.
+`MultiAssetPortfolioStrategy` adapts existing signal strategies to this API;
+`SignalDecisionExecutor` applies allocation and sizing through an `IntentExecutor`.
+The engine checks that every frame has the same symbols and that the executor's
+configuration supports that universe before processing any frames.
 
 ### Backtest results
 
-`BacktestEngine.run()` returns a cached `BacktestResult` containing the asset
-allocations, the cash captured when the engine was created, chronological
+`BacktestEngine.run()` returns a cached `BacktestResult` containing the observed
+`symbols` in first-frame order, the cash captured when the engine was created, chronological
 market-frame records, successful trades produced by that run, and every attempted
-order execution, including rejections.
+order execution, including rejections. Symbols are independent of allocation
+weights, allowing results to describe changing rebalance targets. Empty input
+returns an empty result with `symbols=()` without calling the strategy or executor.
 
-Each `BacktestRecord` retains a `MarketFrame` of aligned candles, per-symbol
-signals, and an end-of-frame `PortfolioSnapshot`. The snapshot separates
+Each `BacktestRecord` retains a `MarketFrame` of aligned candles, a
+`generated_decision`, and an end-of-frame `PortfolioSnapshot`. Per-symbol signals
+are available as `record.generated_decision.signal.signals` for a `SignalDecision`;
+rebalance decisions carry target weights instead. Signal markers skip rebalance
+decisions, while trade markers still show their fills. The snapshot separates
 cash, position quantities, and total portfolio value. It is valued with the
 current candle's close after any pending order has executed at that candle's
 open. `BacktestRecord.market_value` is the value of all open positions and is

@@ -6,6 +6,8 @@ import pytest
 
 from backtester.domain.market import Candle, MarketFrame
 from backtester.engine.backtest import BacktestEngine
+from backtester.execution.decision_execution.intent_executor import IntentExecutor
+from backtester.execution.decision_execution.signal_decision_executor import SignalDecisionExecutor
 from backtester.order_resolving.order_resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
@@ -15,6 +17,7 @@ from backtester.domain.trading import (
     OrderIntent,
     Side,
     Signal,
+    SignalDecision,
     SizingInstruction,
     SizingMode,
     PortfolioSnapshot,
@@ -23,6 +26,7 @@ from backtester.domain.trading import (
     OrderExecutionStatus,
 )
 from backtester.strategies.multi_asset.base import MultiAssetStrategy
+from backtester.strategies.portfolio_strategies.portfolio_strategy import MultiAssetPortfolioStrategy
 
 
 BUY_SIGNAL = MultiAssetSignal({"AAPL": Signal.BUY})
@@ -162,12 +166,12 @@ def make_engine(
     broker = broker or make_broker_mock()
     resolver = resolver or make_resolver_mock()
     engine = BacktestEngine(
-        strategy=strategy,
-        broker=broker,
-        allocation=AssetAllocation({"AAPL": 1.0}),
-        sizing=MultiAssetSizingPlan({"AAPL": plan}),
-        priority=Mock(return_value=0),
-        resolver=resolver,
+        strategy=MultiAssetPortfolioStrategy(strategy),
+        decision_executor=SignalDecisionExecutor(
+            intent_executor=IntentExecutor(resolver, broker, priority=Mock(return_value=0)),
+            allocation=AssetAllocation({"AAPL": 1.0}),
+            sizing=MultiAssetSizingPlan({"AAPL": plan}),
+        ),
         data=frames,
     )
 
@@ -182,7 +186,7 @@ def test_empty_data_produces_empty_result_without_calling_strategy() -> None:
     assert result.records == []
     assert result.order_executions == []
     assert result.trades == []
-    assert result.allocation == AssetAllocation({"AAPL": 1.0})
+    assert result.symbols == ()
     assert result.initial_cash == 1_000
     strategy.on_frame.assert_not_called()
     broker.execute.assert_not_called()
@@ -203,10 +207,9 @@ def test_hold_strategy_creates_records_without_orders_or_trades() -> None:
     result = engine.run()
 
     assert len(result.records) == 3
+    assert result.symbols == ("AAPL",)
     assert [record.generated_decision for record in result.records] == [
-        HOLD_SIGNAL,
-        HOLD_SIGNAL,
-        HOLD_SIGNAL,
+        SignalDecision(frame.timestamp, HOLD_SIGNAL) for frame in frames
     ]
     assert result.order_executions == []
     assert result.trades == []

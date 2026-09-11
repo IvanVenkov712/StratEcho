@@ -86,12 +86,12 @@ def plot_markers(
 
 def plot_close_prices(axes: Axes, result: BacktestResult) -> None:
     """Plot a separate closing-price line for each symbol."""
-    for index, symbol in enumerate(result.allocation.allocations):
+    for index, symbol in enumerate(result.symbols):
         timestamps, values = close_price_series([
             record.frame.candles[symbol] for record in result.records
         ])
         label = _symbol_label("Close prices", result, symbol)
-        color = "tab:cyan" if len(result.allocation.allocations) == 1 else f"C{index % 10}"
+        color = "tab:cyan" if len(result.symbols) == 1 else f"C{index % 10}"
         axes.plot(timestamps, values, label=label, color=color)
 
 def plot_equity(axes: Axes, result: BacktestResult) -> None:
@@ -113,7 +113,7 @@ def plot_trade_markers(
 ) -> None:
     """Plot filled markers at fill times and prices for trades on ``side``."""
     if symbol is None:
-        for asset in result.allocation.allocations:
+        for asset in result.symbols:
             plot_trade_markers(axes, result, side, asset)
         return
     marker_by_side = {
@@ -142,10 +142,10 @@ def plot_trade_markers(
 
 def plot_position_quantity(axes: Axes, result: BacktestResult) -> None:
     """Plot held shares separately for each symbol."""
-    for index, symbol in enumerate(result.allocation.allocations):
+    for index, symbol in enumerate(result.symbols):
         timestamps, values = position_quantity_series(result, symbol)
         label = _symbol_label("Position quantity", result, symbol)
-        color = "tab:brown" if len(result.allocation.allocations) == 1 else f"C{index % 10}"
+        color = "tab:brown" if len(result.symbols) == 1 else f"C{index % 10}"
         axes.plot(timestamps, values, label=label, color=color)
 
 def plot_market_value(axes: Axes, result: BacktestResult) -> None:
@@ -162,7 +162,7 @@ def plot_signal_markers(
     executes at the next candle's open.
     """
     if symbol is None:
-        for asset in result.allocation.allocations:
+        for asset in result.symbols:
             plot_signal_markers(axes, result, signal, asset)
         return
     marker_by_signal = {
@@ -191,4 +191,4 @@ def plot_signal_markers(
 
 
 def _symbol_label(label: str, result: BacktestResult, symbol: str) -> str:
-    return f"{label} ({symbol})" if len(result.allocation.allocations) > 1 else label
+    return f"{label} ({symbol})" if len(result.symbols) > 1 else label

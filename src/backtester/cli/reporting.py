@@ -125,7 +125,7 @@ def _print_data_period(output: TextIO, result: BacktestResult) -> None:
     first_timestamp = result.records[0].timestamp
     last_timestamp = result.records[-1].timestamp
     observation_count = len(result.records)
-    observation_label = "frames" if len(result.allocation.allocations) > 1 else "candles"
+    observation_label = "frames" if len(result.symbols) > 1 else "candles"
 
     print(
         "Data used: "

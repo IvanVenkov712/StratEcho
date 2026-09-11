@@ -9,12 +9,11 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure
 
 from backtester.engine.backtest_result import BacktestResult
-from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.visualization import export
 
 
 RESULT = BacktestResult(
-    allocation=AssetAllocation({"AAPL": 1.0}),
+    symbols=("AAPL",),
     initial_cash=1_000.0,
     records=[],
     trades=[],

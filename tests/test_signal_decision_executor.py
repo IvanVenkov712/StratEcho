@@ -133,7 +133,7 @@ def test_signal_rejects_unsupported_symbol_even_for_hold(
     decision = SignalDecision(DECISION_TIME, MultiAssetSignal({"A": Signal.BUY, "C": signal}))
 
     with pytest.raises(ValueError, match="unsupported=\\['C'\\]"):
-        executor.execute(decision, EXECUTION_TIME, {"A": 20.0, "C": 50.0})
+        executor.execute(decision, EXECUTION_TIME, {"A": 20.0, "B": 50.0})
 
     intent_executor.execute.assert_not_called()
 
@@ -174,12 +174,38 @@ def test_signal_propagates_intent_executor_error(
     allocation = AssetAllocation({"A": 0.5, "B": 0.5})
     executor = SignalDecisionExecutor(intent_executor, sizing, allocation)
     decision = SignalDecision(DECISION_TIME, MultiAssetSignal({}))
+    prices = {"A": 20.0, "B": 50.0}
 
     with pytest.raises(ValueError) as caught:
-        executor.execute(decision, EXECUTION_TIME, {})
+        executor.execute(decision, EXECUTION_TIME, prices)
 
     assert caught.value is error
-    intent_executor.execute.assert_called_once_with([], EXECUTION_TIME, {}, allocation)
+    intent_executor.execute.assert_called_once_with([], EXECUTION_TIME, prices, allocation)
+
+
+@pytest.mark.parametrize("symbols", [("A",), ("A", "C"), ("A", "B", "C"), ()])
+def test_execute_rejects_incompatible_prices_even_for_empty_signals(
+    intent_executor: Mock, sizing: MultiAssetSizingPlan, symbols: tuple[str, ...],
+) -> None:
+    executor = SignalDecisionExecutor(intent_executor, sizing, AssetAllocation({"A": 0.5, "B": 0.5}))
+    decision = SignalDecision(DECISION_TIME, MultiAssetSignal({}))
+
+    with pytest.raises(ValueError, match="Market data symbols do not match"):
+        executor.execute(decision, EXECUTION_TIME, dict.fromkeys(symbols, 20.0))
+
+    intent_executor.execute.assert_not_called()
+
+
+def test_validating_signal_does_not_size_or_execute_orders(
+    intent_executor: Mock, sizing: MultiAssetSizingPlan,
+) -> None:
+    executor = SignalDecisionExecutor(intent_executor, sizing, AssetAllocation({"A": 0.5, "B": 0.5}))
+    decision = SignalDecision(DECISION_TIME, MultiAssetSignal({"A": Signal.BUY}))
+
+    executor.validate_decision(decision, ("A", "B"))
+
+    intent_executor.execute.assert_not_called()
+    intent_executor.broker.portfolio.snapshot.assert_not_called()
 
 
 @pytest.mark.parametrize(("signal", "expected_side"), [(Signal.BUY, Side.BUY), (Signal.SELL, Side.SELL)])

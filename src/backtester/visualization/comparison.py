@@ -20,9 +20,9 @@ from backtester.visualization.series import (
 
 
 def _validate_results(strategy: BacktestResult, benchmark: BacktestResult) -> None:
-    """Require matching allocations and initial capital for a comparison."""
-    if strategy.allocation != benchmark.allocation:
-        raise ValueError("Comparison results must have the same symbols and allocations.")
+    """Require matching symbol universes and initial capital for a comparison."""
+    if set(strategy.symbols) != set(benchmark.symbols):
+        raise ValueError("Comparison results must have the same symbols.")
     if strategy.initial_cash != benchmark.initial_cash:
         raise ValueError("Comparison results must have the same initial cash.")
 
@@ -125,7 +125,7 @@ def populate_position_panel(
     axes: Axes, strategy: BacktestResult, benchmark: BacktestResult,
 ) -> None:
     """Compare held shares, using a shared color per symbol for multiple assets."""
-    symbols = tuple(strategy.allocation.allocations)
+    symbols = tuple(strategy.symbols)
     for index, symbol in enumerate(symbols):
         for result, label, linestyle in (
             (strategy, "Strategy", "-"), (benchmark, "Benchmark", "--"),
@@ -184,7 +184,7 @@ def create_comparison_figure(
 ) -> Figure:
     """Return equity, drawdown, difference, cash, and quantity comparisons.
 
-    Results must share allocations, initial cash, and strictly ordered timestamps.
+    Results must share symbols, initial cash, and strictly ordered timestamps.
     Equity differences are absolute cash amounts, not percentage returns.
     Drawdowns use each result's own running equity peak. Values are recorded
     end-of-period snapshots, including the simulated costs of each run.
@@ -197,7 +197,7 @@ def create_comparison_figure(
     timestamps, differences = equity_difference_series(strategy, benchmark)
     heading = _format_heading(
         f"{strategy_name} vs {benchmark_name}",
-        tuple(strategy.allocation.allocations),
+        tuple(strategy.symbols),
         timestamps,
         subtitle,
     )

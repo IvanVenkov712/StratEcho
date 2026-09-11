@@ -215,7 +215,7 @@ def test_commands_load_each_symbol_once_and_wire_allocations_and_priority(
     if command == "compare":
         benchmark = exporter.call_args.args[1]
         assert benchmark is not result
-        assert benchmark.allocation == result.allocation
+        assert benchmark.symbols == result.symbols
         assert benchmark.records[-1].snapshot.value == 1030
         assert len(benchmark.trades) == 2
     output = capsys.readouterr().out

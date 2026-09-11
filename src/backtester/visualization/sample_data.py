@@ -8,6 +8,8 @@ from backtester.domain.trading import SizingInstruction, SizingMode
 from backtester.engine.backtest import BacktestEngine
 from backtester.engine.backtest_result import BacktestResult
 from backtester.execution.broker import Broker
+from backtester.execution.decision_execution.intent_executor import IntentExecutor
+from backtester.execution.decision_execution.signal_decision_executor import SignalDecisionExecutor
 from backtester.execution.costs import (
     ExecutionModel,
     ProportionalCommissionModel,
@@ -18,6 +20,7 @@ from backtester.order_resolving.order_resolver import OrderResolver, QuantityRes
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.strategies.multi_asset.simple_multi_asset import SimpleMultiAssetStrategy
+from backtester.strategies.portfolio_strategies.portfolio_strategy import MultiAssetPortfolioStrategy
 from backtester.strategies.rsi_strategies import WilderRSIStrategy
 
 
@@ -50,12 +53,14 @@ def load_results() -> BacktestResult:
     )
 
     engine = BacktestEngine(
-        strategy=SimpleMultiAssetStrategy({"MSFT": WilderRSIStrategy(30, 70)}),
-        broker=broker,
-        allocation=AssetAllocation({"MSFT": 1.0}),
-        sizing=MultiAssetSizingPlan({"MSFT": plan}),
-        resolver=resolver,
-        priority=lambda symbol: 0,
+        strategy=MultiAssetPortfolioStrategy(
+            SimpleMultiAssetStrategy({"MSFT": WilderRSIStrategy(30, 70)})
+        ),
+        decision_executor=SignalDecisionExecutor(
+            intent_executor=IntentExecutor(resolver, broker, priority=lambda symbol: 0),
+            allocation=AssetAllocation({"MSFT": 1.0}),
+            sizing=MultiAssetSizingPlan({"MSFT": plan}),
+        ),
         data=frames,
     )
     return engine.run()

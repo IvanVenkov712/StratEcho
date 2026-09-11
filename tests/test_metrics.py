@@ -3,9 +3,9 @@ from math import isclose, sqrt
 
 import pytest
 
+from backtester.domain.trading import SignalDecision
 from backtester.domain.market import Candle, MarketFrame
 from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade, MultiAssetSignal
-from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.engine.backtest_result import BacktestRecord, BacktestResult
 from backtester.metrics.metrics import (
     MetricData,
@@ -34,7 +34,7 @@ def make_record(timestamp: datetime, portfolio_value: float) -> BacktestRecord:
             close=candle_price,
             volume=1_000,
         )}),
-        generated_decision=MultiAssetSignal({"AAPL": Signal.HOLD}),
+        generated_decision=SignalDecision(timestamp, MultiAssetSignal({"AAPL": Signal.HOLD})),
         snapshot=PortfolioSnapshot(
             cash=portfolio_value,
             value=portfolio_value,
@@ -55,7 +55,7 @@ def make_result(
     ]
 
     return BacktestResult(
-        allocation=AssetAllocation({"AAPL": 1.0}),
+        symbols=("AAPL",),
         initial_cash=values[0] if values else 0.0,
         records=records,
         trades=trades or [],
@@ -85,7 +85,7 @@ def test_annualized_return_uses_elapsed_calendar_days() -> None:
         start=datetime(2026, 1, 1),
     )
     result = BacktestResult(
-        allocation=result.allocation,
+        symbols=result.symbols,
         initial_cash=result.initial_cash,
         records=[
             result.records[0],

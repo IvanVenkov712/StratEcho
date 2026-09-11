@@ -12,9 +12,9 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.ticker import PercentFormatter
 
+from backtester.domain.trading import SignalDecision
 from backtester.domain.market import Candle, MarketFrame
 from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade, MultiAssetSignal
-from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.engine.backtest_result import BacktestRecord, BacktestResult
 from backtester.visualization import dashboard
 
@@ -23,7 +23,7 @@ START = datetime(2026, 1, 1)
 
 
 EMPTY_RESULT = BacktestResult(
-    allocation=AssetAllocation({"AAPL": 1.0}),
+    symbols=("AAPL",),
     initial_cash=1_000.0,
     records=[],
     trades=[],
@@ -48,7 +48,7 @@ def populated_result() -> BacktestResult:
                 close=close,
                 volume=1_000,
             )}),
-            generated_decision=MultiAssetSignal({"AAPL": signal}),
+            generated_decision=SignalDecision(START + timedelta(days=index), MultiAssetSignal({"AAPL": signal})),
             snapshot=PortfolioSnapshot(
                 cash=cash,
                 value=value,
@@ -64,7 +64,7 @@ def populated_result() -> BacktestResult:
         Trade("AAPL", Side.SELL, 5, 100.0, 0.0, START + timedelta(days=3)),
     ]
     return BacktestResult(
-        allocation=AssetAllocation({"AAPL": 1.0}),
+        symbols=("AAPL",),
         initial_cash=1_000.0,
         records=records,
         trades=trades,

@@ -4,7 +4,6 @@ from typing import Sequence
 
 from backtester.data.validation import validate_frames_chronological, validate_symbols
 from backtester.domain.market import MarketFrame
-from backtester.domain.trading import PendingDecision
 from backtester.engine.backtest_result import BacktestResult, BacktestRecord
 from backtester.execution.decision_execution.decision_executor import DecisionExecutor
 from backtester.strategies.portfolio_strategies.portfolio_strategy import PortfolioStrategy
@@ -19,9 +18,9 @@ class BacktestEngine:
     portfolio snapshot, including the effects of earlier fills in that frame.
 
     The strategy receives the current frame only after pending execution.
-    Allocation weights constrain buy sizing without generating rebalance orders.
-    Allocation keys define the supported symbols. Every frame and the sizing
-    plan must contain exactly those symbols; signals may contain a subset.
+    Every frame must contain the same symbols. The executor validates those
+    symbols against its configuration and validates each generated decision,
+    including the final decision that cannot be executed.
     """
 
     def __init__(
@@ -33,31 +32,28 @@ class BacktestEngine:
         """Create a backtest engine for one strategy and a shared portfolio.
 
         Args:
-            strategy: Trading strategy that processes chronological market
-                frames and produces per-symbol buy, sell, or hold signals.
-            broker: Broker responsible for order execution and portfolio
-                accounting.
-            allocation: Per-symbol fractions of total equity used as buy-sizing
-                targets, without automatic rebalancing or cash reservation.
-            sizing: Per-symbol buy and sell instructions attached to intents.
-            resolver: Component that converts pending intents into whole-share
-                orders using execution costs and the next frame's opening
-                portfolio snapshot.
-            priority: Symbol ranking within each order side; lower values execute
-                first, with lexicographic symbol order breaking ties.
+            strategy: Strategy observing each frame and its closing portfolio
+                snapshot to produce a decision.
+            decision_executor: Validates decisions and executes them through
+                its broker using the next frame's opening prices.
             data: Chronologically ordered market frames used by the simulation.
+                Empty data produces an empty result without calling the strategy.
         """
 
         validated_data = tuple(data)
         validate_frames_chronological(validated_data)
-        supported_symbols = frozenset(data[0].candles)
+        supported_symbols = tuple(validated_data[0].candles) if validated_data else ()
+        if validated_data:
+            decision_executor.validate_universe(
+                supported_symbols, source=f"Frame at {validated_data[0].timestamp}"
+            )
         for frame in validated_data:
             validate_symbols(
                 frame.candles, supported_symbols, source=f"Frame at {frame.timestamp}"
             )
 
         self._data = validated_data
-        self._results = None
+        self._results: BacktestResult | None = None
         self._supported_symbols = supported_symbols
         self._strategy = strategy
         self._decision_executor = decision_executor
@@ -91,25 +87,15 @@ class BacktestEngine:
                 order_executions_total.extend(exec_result.order_executions)
                 trades_total.extend(exec_result.trades)
 
-            decision = self._strategy.on_frame(
-                frame,
-                self._decision_executor.broker.portfolio.snapshot(frame.close_prices())
-            )
-            records.append(self._create_record(frame, decision))
+            snapshot = self._decision_executor.broker.portfolio.snapshot(prices=frame.close_prices())
+            decision = self._strategy.on_frame(frame, snapshot)
+            self._decision_executor.validate_decision(decision, self._supported_symbols)
+            records.append(BacktestRecord(frame, decision, snapshot))
 
         return BacktestResult(
+            symbols=self._supported_symbols,
             initial_cash=self._initial_cash,
             records=records,
             trades=trades_total,
             order_executions=order_executions_total
-        )
-
-
-
-    def _create_record(self, frame: MarketFrame, decision: PendingDecision) -> BacktestRecord:
-        """Create a per-candle snapshot valued at the current close."""
-        return BacktestRecord(
-            frame=frame,
-            generated_decision=decision,
-            snapshot=self._decision_executor.broker.portfolio.snapshot(prices=frame.close_prices())
         )

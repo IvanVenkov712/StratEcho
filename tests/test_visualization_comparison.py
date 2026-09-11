@@ -11,11 +11,10 @@ from matplotlib import pyplot as plt
 from matplotlib.ticker import PercentFormatter
 
 from backtester.engine.backtest_result import BacktestResult
-from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.visualization import comparison
 
 
-RESULT = BacktestResult(AssetAllocation({"AAPL": 1.0}), 1000, [], [], [])
+RESULT = BacktestResult(("AAPL",), 1000, [], [], [])
 
 
 def test_comparison_routes_both_results_and_formats_five_panels(
@@ -72,12 +71,24 @@ def test_comparison_routes_both_results_and_formats_five_panels(
 
 @pytest.mark.parametrize(
     ("benchmark", "message"),
-    [(replace(RESULT, allocation=AssetAllocation({"MSFT": 1.0})), "same symbol"),
+    [(replace(RESULT, symbols=("MSFT",)), "same symbol"),
      (replace(RESULT, initial_cash=2000), "same initial cash")],
 )
 def test_comparison_rejects_incompatible_results(benchmark, message) -> None:
     with pytest.raises(ValueError, match=message):
         comparison.create_comparison_figure(RESULT, benchmark)
+
+
+def test_comparison_accepts_same_universe_in_different_orders() -> None:
+    strategy = replace(RESULT, symbols=("AAPL", "MSFT"))
+    benchmark = replace(RESULT, symbols=("MSFT", "AAPL"))
+
+    figure = comparison.create_comparison_figure(strategy, benchmark)
+    try:
+        assert len(figure.axes) == 5
+        assert "AAPL, MSFT" in figure._suptitle.get_text()
+    finally:
+        plt.close(figure)
 
 
 def test_comparison_can_render_empty_results_without_a_table() -> None:

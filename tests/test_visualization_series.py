@@ -3,9 +3,9 @@ from dataclasses import replace
 
 import pytest
 
+from backtester.domain.trading import RebalanceDecision, SignalDecision, TargetAllocation
 from backtester.domain.market import Candle, MarketFrame
 from backtester.domain.trading import PortfolioSnapshot, Side, Signal, Trade, MultiAssetSignal
-from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.engine.backtest_result import BacktestRecord, BacktestResult
 from backtester.visualization.series import (
     cash_series,
@@ -82,7 +82,7 @@ def make_record(
 ) -> BacktestRecord:
     return BacktestRecord(
         frame=MarketFrame(timestamp, {"AAPL": make_candle(timestamp, close=close)}),
-        generated_decision=MultiAssetSignal({"AAPL": signal}),
+        generated_decision=SignalDecision(timestamp, MultiAssetSignal({"AAPL": signal})),
         snapshot=PortfolioSnapshot(
             cash=cash,
             value=value,
@@ -96,7 +96,7 @@ def make_result(
     trades: list[Trade] | None = None,
 ) -> BacktestResult:
     return BacktestResult(
-        allocation=AssetAllocation({"AAPL": 1.0}),
+        symbols=("AAPL",),
         initial_cash=1_000.0,
         records=records or [],
         trades=trades or [],
@@ -266,13 +266,27 @@ def test_signal_marker_series_returns_empty_lists_when_signal_has_no_records() -
     assert signal_marker_series(make_result(), Signal.SELL) == ([], [])
 
 
+def test_signal_markers_skip_rebalance_decisions_but_keep_signal_decisions() -> None:
+    signal_record = make_record(START, value=1000, cash=1000, close=100, signal=Signal.BUY)
+    next_day = START + timedelta(days=1)
+    rebalance_record = replace(
+        make_record(next_day, value=1000, cash=500, positions={"AAPL": 5}),
+        generated_decision=RebalanceDecision(next_day, TargetAllocation({"AAPL": 1.0})),
+    )
+    result = make_result([signal_record, rebalance_record])
+
+    assert signal_marker_series(result, Signal.BUY) == ([START], [100])
+    assert signal_marker_series(result, Signal.SELL) == ([], [])
+    assert position_quantity_series(result) == ([START, next_day], [0, 5])
+
+
 def test_multi_asset_series_keep_symbols_separate() -> None:
     record = BacktestRecord(
         frame=MarketFrame(START, {
             "AAPL": make_candle(START, close=100),
             "MSFT": make_candle(START, close=200),
         }),
-        generated_decision=MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.SELL}),
+        generated_decision=SignalDecision(START, MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.SELL})),
         snapshot=PortfolioSnapshot(cash=0, positions={"AAPL": 3, "MSFT": 4}, value=1100),
     )
     result = replace(
@@ -280,7 +294,7 @@ def test_multi_asset_series_keep_symbols_separate() -> None:
             Trade("AAPL", Side.BUY, 3, 99, 0, START),
             Trade("MSFT", Side.BUY, 4, 199, 0, START),
         ]),
-        allocation=AssetAllocation({"AAPL": 0.5, "MSFT": 0.5}),
+        symbols=("AAPL", "MSFT"),
     )
     assert signal_marker_series(result, Signal.BUY, "AAPL") == ([START], [100])
     assert signal_marker_series(result, Signal.BUY, "MSFT") == ([], [])

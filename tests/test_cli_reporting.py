@@ -26,7 +26,6 @@ from backtester.domain.trading import (
 from backtester.engine.backtest_result import BacktestResult
 from backtester.metrics.benchmark_comparison import get_differences
 from backtester.metrics.metrics import MetricData
-from backtester.sizing.asset_allocation import AssetAllocation
 
 @pytest.mark.parametrize(
     ("arguments", "expected"),
@@ -348,7 +347,7 @@ def test_print_rejected_orders_uses_execution_status(
         trade=None,
     )
     result = BacktestResult(
-        allocation=AssetAllocation({"AAPL": 1.0}),
+        symbols=("AAPL",),
         initial_cash=1_000,
         records=[],
         trades=[],
@@ -379,7 +378,7 @@ def test_rejected_order_details_are_omitted_above_display_limit() -> None:
         for _ in range(MAX_REJECTED_ORDER_DETAILS + 1)
     ]
     result = BacktestResult(
-        allocation=AssetAllocation({"AAPL": 1.0}),
+        symbols=("AAPL",),
         initial_cash=1_000,
         records=[],
         trades=[],

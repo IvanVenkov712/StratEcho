@@ -4,15 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
-from backtester.domain.market import Candle, MarketFrame
-from backtester.domain.trading import Signal, Trade, OrderExecutionResult, PortfolioSnapshot, MultiAssetSignal, \
-    PendingDecision
-from backtester.sizing.asset_allocation import AssetAllocation
+from backtester.domain.market import MarketFrame
+from backtester.domain.trading import Trade, OrderExecutionResult, PortfolioSnapshot, PendingDecision
 
 
 @dataclass(frozen=True)
 class BacktestRecord:
-    """Signal and end-of-period portfolio snapshot for one candle."""
+    """Decision and end-of-period portfolio snapshot for one market frame."""
     frame: MarketFrame
     generated_decision: PendingDecision
     snapshot: PortfolioSnapshot
@@ -27,7 +25,12 @@ class BacktestRecord:
 
 @dataclass(frozen=True)
 class BacktestResult:
-    """Run metadata, chronological records, trades, and attempted orders."""
+    """Observed symbols, chronological records, trades, and attempted orders.
+
+    Symbols follow the first frame's order, independently of allocation weights.
+    An empty run has no observed symbols.
+    """
+    symbols: tuple[str, ...]
     initial_cash: float
     records: Sequence[BacktestRecord]
     trades: Sequence[Trade]

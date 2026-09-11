@@ -19,15 +19,30 @@ from backtester.domain.trading import (
 )
 from backtester.engine.backtest import BacktestEngine
 from backtester.execution.broker import Broker
+from backtester.execution.decision_execution.intent_executor import IntentExecutor
+from backtester.execution.decision_execution.signal_decision_executor import SignalDecisionExecutor
+from backtester.domain.trading import SignalDecision
 from backtester.order_resolving.order_resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.strategies.multi_asset.base import MultiAssetStrategy
+from backtester.strategies.portfolio_strategies.portfolio_strategy import MultiAssetPortfolioStrategy
 
 
 SYMBOLS = ("AAPL", "MSFT")
 ALL_IN = SizingInstruction(mode=SizingMode.ALL_IN, value=None)
 PLAN = SizingPlan(buy=ALL_IN, sell=ALL_IN)
+
+
+def make_engine(*, strategy, broker, allocation, sizing, resolver, priority, data) -> BacktestEngine:
+    """Wire the signal pipeline with mocked strategy, broker, and resolver."""
+    return BacktestEngine(
+        strategy=MultiAssetPortfolioStrategy(strategy),
+        decision_executor=SignalDecisionExecutor(
+            IntentExecutor(resolver, broker, priority), sizing, allocation,
+        ),
+        data=data,
+    )
 
 
 def make_frame(symbols: tuple[str, ...] = SYMBOLS, day: int = 0) -> MarketFrame:
@@ -74,7 +89,7 @@ def test_rejects_mismatched_configuration_before_processing(
         engine_args["data"].append(make_frame(symbols, day=1))
 
     with pytest.raises(ValueError, match="symbols do not match supported symbols"):
-        BacktestEngine(**engine_args)
+        make_engine(**engine_args)
 
     engine_args["strategy"].on_frame.assert_not_called()
     engine_args["resolver"].resolve.assert_not_called()
@@ -87,11 +102,37 @@ def test_frame_error_identifies_timestamp_and_missing_and_unsupported_symbols(
     engine_args["data"] = [make_frame(("AAPL", "GOOG"))]
 
     with pytest.raises(ValueError) as error:
-        BacktestEngine(**engine_args)
+        make_engine(**engine_args)
 
     assert "Frame at 2026-01-01" in str(error.value)
     assert "unsupported=['GOOG']" in str(error.value)
     assert "missing=['MSFT']" in str(error.value)
+
+
+@pytest.mark.parametrize("symbols", [("GOOG",), ("AAPL",), ("AAPL", "MSFT", "GOOG"), ()])
+def test_matching_allocation_and_sizing_must_also_match_market_data(
+    engine_args: dict, symbols: tuple[str, ...],
+) -> None:
+    engine_args["allocation"] = AssetAllocation({symbol: 0.25 for symbol in symbols})
+    engine_args["sizing"] = MultiAssetSizingPlan({symbol: PLAN for symbol in symbols})
+
+    with pytest.raises(ValueError, match="Frame at.*symbols do not match"):
+        make_engine(**engine_args)
+
+    engine_args["strategy"].on_frame.assert_not_called()
+    engine_args["resolver"].resolve.assert_not_called()
+    engine_args["broker"].execute.assert_not_called()
+
+
+@pytest.mark.parametrize("invalid_signal", [None, "buy", 1])
+def test_final_frame_invalid_signal_value_is_rejected(engine_args: dict, invalid_signal: object) -> None:
+    engine_args["strategy"].on_frame.return_value = MultiAssetSignal({"AAPL": invalid_signal})
+
+    with pytest.raises(ValueError, match="Not a valid signal"):
+        make_engine(**engine_args).run()
+
+    engine_args["resolver"].resolve.assert_not_called()
+    engine_args["broker"].execute.assert_not_called()
 
 
 @pytest.mark.parametrize("signal", list(Signal))
@@ -99,23 +140,23 @@ def test_rejects_unsupported_signals_even_on_the_final_frame(
     engine_args: dict, signal: Signal,
 ) -> None:
     engine_args["strategy"].on_frame.return_value = MultiAssetSignal({"GOOG": signal})
-    engine = BacktestEngine(**engine_args)
+    engine = make_engine(**engine_args)
 
     with pytest.raises(ValueError, match="Strategy signal.*unsupported=.*GOOG"):
         engine.run()
 
     engine_args["resolver"].resolve.assert_not_called()
     engine_args["broker"].execute.assert_not_called()
-    engine_args["broker"].portfolio.snapshot.assert_not_called()
+    engine_args["broker"].portfolio.snapshot.assert_called_once_with(prices=engine_args["data"][0].close_prices())
 
 
 @pytest.mark.parametrize("signals", [{}, {"MSFT": Signal.HOLD}, {"AAPL": Signal.BUY}])
 def test_accepts_partial_signals(engine_args: dict, signals: dict[str, Signal]) -> None:
     engine_args["strategy"].on_frame.return_value = MultiAssetSignal(signals)
 
-    result = BacktestEngine(**engine_args).run()
+    result = make_engine(**engine_args).run()
 
-    assert result.records[0].generated_decision == MultiAssetSignal(signals)
+    assert result.records[0].generated_decision == SignalDecision(engine_args["data"][0].timestamp, MultiAssetSignal(signals))
     assert result.order_executions == []
 
 
@@ -124,22 +165,22 @@ def test_empty_data_still_validates_sizing(engine_args: dict) -> None:
     engine_args["sizing"] = MultiAssetSizingPlan({"AAPL": PLAN})
 
     with pytest.raises(ValueError, match="Sizing plan.*missing=.*MSFT"):
-        BacktestEngine(**engine_args)
+        make_engine(**engine_args)
 
 
 def test_zero_weight_symbol_is_still_supported(engine_args: dict) -> None:
     engine_args["allocation"] = AssetAllocation({"AAPL": 1.0, "MSFT": 0.0})
     engine_args["strategy"].on_frame.return_value = MultiAssetSignal({"MSFT": Signal.SELL})
 
-    result = BacktestEngine(**engine_args).run()
+    result = make_engine(**engine_args).run()
 
-    assert result.records[0].generated_decision.signals == {"MSFT": Signal.SELL}
+    assert result.records[0].generated_decision.signal.signals == {"MSFT": Signal.SELL}
 
 
 def test_valid_empty_data_does_not_call_strategy(engine_args: dict) -> None:
     engine_args["data"] = []
 
-    result = BacktestEngine(**engine_args).run()
+    result = make_engine(**engine_args).run()
 
     assert result.records == []
     engine_args["strategy"].on_frame.assert_not_called()
@@ -155,7 +196,7 @@ def test_partial_signal_only_resolves_present_symbol_at_next_frame_open(
         MultiAssetSignal({symbol: Signal.BUY}), MultiAssetSignal({}),
     ]
 
-    BacktestEngine(**engine_args).run()
+    make_engine(**engine_args).run()
 
     engine_args["resolver"].resolve.assert_called_once()
     arguments = engine_args["resolver"].resolve.call_args.kwargs
@@ -223,7 +264,7 @@ def test_simultaneous_buys_share_refreshed_cash_and_equity_in_priority_order(
     executions = [make_execution(order, commission=commission) for order in orders]
     engine_args["broker"].execute.side_effect = executions
 
-    result = BacktestEngine(**engine_args).run()
+    result = make_engine(**engine_args).run()
 
     assert engine_args["resolver"].resolve.call_args_list == [
         call(
@@ -270,7 +311,7 @@ def test_sell_funds_another_assets_buy_at_the_same_open(engine_args: dict) -> No
     events.attach_mock(engine_args["broker"].execute, "execute")
     events.attach_mock(engine_args["strategy"].on_frame, "on_frame")
 
-    result = BacktestEngine(**engine_args).run()
+    result = make_engine(**engine_args).run()
 
     assert events.mock_calls == [
         call.on_frame(first),
@@ -301,12 +342,12 @@ def test_final_frame_multi_asset_signals_are_recorded_without_execution(engine_a
     engine_args["data"] = [first, final]
     engine_args["strategy"].on_frame.side_effect = [MultiAssetSignal({}), signal]
 
-    engine = BacktestEngine(**engine_args)
+    engine = make_engine(**engine_args)
     result = engine.run()
 
     assert engine.run() is result
     assert result.records[-1].frame is final
-    assert result.records[-1].generated_decision == signal
+    assert result.records[-1].generated_decision == SignalDecision(final.timestamp, signal)
     assert result.order_executions == []
     assert result.trades == []
     engine_args["resolver"].resolve.assert_not_called()
