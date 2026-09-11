@@ -1,10 +1,12 @@
 from datetime import datetime
-from typing import Callable, Sequence
+from typing import Callable
 
-from backtester.domain.trading import PendingDecision, RebalanceDecision, Order, Side
+from backtester.domain.trading import PendingDecision, RebalanceDecision
 from backtester.execution.broker import Broker
 from backtester.execution.decision_execution.decision_executor import DecisionExecutor, DecisionExecutionResult
+from backtester.execution.decision_execution.intent_executor import IntentExecutor
 from backtester.rebalance.rebalance_planner import RebalancePlanner, RebalanceContext
+from backtester.sizing.asset_allocation import AssetAllocation
 
 
 class RebalanceDecisionExecutor(DecisionExecutor):
@@ -14,10 +16,12 @@ class RebalanceDecisionExecutor(DecisionExecutor):
             broker: Broker,
             rebalance_planner: RebalancePlanner,
             priority: Callable[[str], int],
+            intent_executor: IntentExecutor
     ):
         self._broker = broker
         self._planner = rebalance_planner
         self._priority = priority
+        self._intent_executor = intent_executor
 
     def execute(
             self,
@@ -30,7 +34,7 @@ class RebalanceDecisionExecutor(DecisionExecutor):
 
         rebalance_decision: RebalanceDecision = pending_decision
 
-        orders = self._planner.get_intents(
+        intents = self._planner.get_intents(
             RebalanceContext(
                 execution_timestamp=timestamp,
                 decision_timestamp=rebalance_decision.timestamp,
@@ -39,34 +43,7 @@ class RebalanceDecisionExecutor(DecisionExecutor):
                 prices=prices
             )
         )
-
-        sorted_orders = self.sort_orders(orders)
-        return self._execute_orders(sorted_orders, prices, timestamp)
-
-    def sort_orders(self, orders: Sequence[Order]) -> Sequence[Order]:
-
-        def order_key(order: Order) -> tuple[int, int, str]:
-            first = 0 if order.side is Side.SELL else 1
-            second = self._priority(order.symbol)
-            third = order.symbol
-            return first, second, third
-
-        return sorted(orders, key=order_key)
-
-
-    def _execute_orders(
-            self,
-            orders: Sequence[Order],
-            prices: dict[str, float],
-            timestamp: datetime
-    ) -> DecisionExecutionResult:
-
-        results = []
-        trades = []
-        for order in orders:
-            result = self._broker.execute(order, prices, timestamp)
-            results.append(result)
-            if result.trade is not None:
-                trades.append(result.trade)
-
-        return DecisionExecutionResult(results, trades)
+        allocation = AssetAllocation(
+            allocations=dict(rebalance_decision.target.weights)
+        )
+        return self._intent_executor.execute(intents, timestamp, prices, allocation)

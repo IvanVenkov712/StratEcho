@@ -3,8 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Mapping, Sequence
 
-from backtester.domain.trading import TargetAllocation, PortfolioSnapshot, Order, OrderIntent, SizingMode
-from backtester.sizing.policy import SizingPlan
+from backtester.domain.trading import TargetAllocation, PortfolioSnapshot, OrderIntent, SizingMode
 
 
 @dataclass(frozen=True)
@@ -24,5 +23,5 @@ class RebalancePlanner(ABC):
         self._sizing = sizing
 
     @abstractmethod
-    def get_intents(self, context: RebalanceContext) -> Sequence[Order]:
+    def get_intents(self, context: RebalanceContext) -> Sequence[OrderIntent]:
         pass
