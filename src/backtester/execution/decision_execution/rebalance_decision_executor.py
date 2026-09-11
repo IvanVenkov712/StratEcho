@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Callable
 
 from backtester.domain.trading import PendingDecision, RebalanceDecision
 from backtester.execution.broker import Broker
@@ -15,12 +14,10 @@ class RebalanceDecisionExecutor(DecisionExecutor):
             self,
             broker: Broker,
             rebalance_planner: RebalancePlanner,
-            priority: Callable[[str], int],
             intent_executor: IntentExecutor
     ):
         self._broker = broker
         self._planner = rebalance_planner
-        self._priority = priority
         self._intent_executor = intent_executor
 
     def execute(
