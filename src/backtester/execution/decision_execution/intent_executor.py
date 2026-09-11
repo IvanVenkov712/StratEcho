@@ -19,6 +19,10 @@ class IntentExecutor:
         self._resolver = resolver
         self._priority = priority
 
+    @property
+    def broker(self) -> Broker:
+        return self._broker
+
     def execute(
             self,
             intents: Sequence[OrderIntent],

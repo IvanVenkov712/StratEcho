@@ -1,7 +1,6 @@
 from datetime import datetime
 
 from backtester.domain.trading import PendingDecision, RebalanceDecision
-from backtester.execution.broker import Broker
 from backtester.execution.decision_execution.decision_executor import DecisionExecutor, DecisionExecutionResult
 from backtester.execution.decision_execution.intent_executor import IntentExecutor
 from backtester.rebalance.rebalance_planner import RebalancePlanner, RebalanceContext
@@ -12,11 +11,10 @@ class RebalanceDecisionExecutor(DecisionExecutor):
 
     def __init__(
             self,
-            broker: Broker,
             rebalance_planner: RebalancePlanner,
             intent_executor: IntentExecutor
     ):
-        self._broker = broker
+        super().__init__(intent_executor.broker)
         self._planner = rebalance_planner
         self._intent_executor = intent_executor
 
@@ -30,7 +28,7 @@ class RebalanceDecisionExecutor(DecisionExecutor):
             raise ValueError("RebalanceDecision is expected")
 
         rebalance_decision: RebalanceDecision = pending_decision
-        snapshot = self._broker.portfolio.snapshot(prices)
+        snapshot = self.broker.portfolio.snapshot(prices)
 
         intents = self._planner.get_intents(
             RebalanceContext(

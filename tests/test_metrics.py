@@ -34,7 +34,7 @@ def make_record(timestamp: datetime, portfolio_value: float) -> BacktestRecord:
             close=candle_price,
             volume=1_000,
         )}),
-        generated_signal=MultiAssetSignal({"AAPL": Signal.HOLD}),
+        generated_decision=MultiAssetSignal({"AAPL": Signal.HOLD}),
         snapshot=PortfolioSnapshot(
             cash=portfolio_value,
             value=portfolio_value,

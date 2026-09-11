@@ -146,7 +146,7 @@ def signal_marker_series(
     matching_records = [
         record
         for record in result.records
-        if record.generated_signal.signals.get(symbol) == signal
+        if record.generated_decision.signals.get(symbol) == signal
     ]
 
     return (

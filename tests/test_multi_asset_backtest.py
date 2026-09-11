@@ -115,7 +115,7 @@ def test_accepts_partial_signals(engine_args: dict, signals: dict[str, Signal]) 
 
     result = BacktestEngine(**engine_args).run()
 
-    assert result.records[0].generated_signal == MultiAssetSignal(signals)
+    assert result.records[0].generated_decision == MultiAssetSignal(signals)
     assert result.order_executions == []
 
 
@@ -133,7 +133,7 @@ def test_zero_weight_symbol_is_still_supported(engine_args: dict) -> None:
 
     result = BacktestEngine(**engine_args).run()
 
-    assert result.records[0].generated_signal.signals == {"MSFT": Signal.SELL}
+    assert result.records[0].generated_decision.signals == {"MSFT": Signal.SELL}
 
 
 def test_valid_empty_data_does_not_call_strategy(engine_args: dict) -> None:
@@ -306,7 +306,7 @@ def test_final_frame_multi_asset_signals_are_recorded_without_execution(engine_a
 
     assert engine.run() is result
     assert result.records[-1].frame is final
-    assert result.records[-1].generated_signal == signal
+    assert result.records[-1].generated_decision == signal
     assert result.order_executions == []
     assert result.trades == []
     engine_args["resolver"].resolve.assert_not_called()

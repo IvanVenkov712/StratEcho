@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Sequence
 
 from backtester.domain.trading import OrderExecutionResult, Trade, PendingDecision
+from backtester.execution.broker import Broker
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,12 @@ class DecisionExecutionResult:
 
 
 class DecisionExecutor(ABC):
+    def __init__(self, broker: Broker):
+        self._broker = broker
+
+    @property
+    def broker(self) -> Broker:
+        return self._broker
 
     @abstractmethod
     def execute(

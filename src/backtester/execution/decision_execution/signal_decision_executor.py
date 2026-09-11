@@ -17,6 +17,7 @@ class SignalDecisionExecutor(DecisionExecutor):
             sizing: MultiAssetSizingPlan,
             allocation: AssetAllocation,
     ):
+        super().__init__(intent_executor.broker)
         supported_symbols = frozenset(allocation.allocations)
         validate_symbols(sizing.plans, supported_symbols, source="Sizing plan")
         self._intent_executor = intent_executor

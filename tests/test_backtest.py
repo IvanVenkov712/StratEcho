@@ -203,7 +203,7 @@ def test_hold_strategy_creates_records_without_orders_or_trades() -> None:
     result = engine.run()
 
     assert len(result.records) == 3
-    assert [record.generated_signal for record in result.records] == [
+    assert [record.generated_decision for record in result.records] == [
         HOLD_SIGNAL,
         HOLD_SIGNAL,
         HOLD_SIGNAL,

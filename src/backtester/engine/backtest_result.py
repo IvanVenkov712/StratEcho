@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Sequence
 
 from backtester.domain.market import Candle, MarketFrame
-from backtester.domain.trading import Signal, Trade, OrderExecutionResult, PortfolioSnapshot, MultiAssetSignal
+from backtester.domain.trading import Signal, Trade, OrderExecutionResult, PortfolioSnapshot, MultiAssetSignal, \
+    PendingDecision
 from backtester.sizing.asset_allocation import AssetAllocation
 
 
@@ -13,7 +14,7 @@ from backtester.sizing.asset_allocation import AssetAllocation
 class BacktestRecord:
     """Signal and end-of-period portfolio snapshot for one candle."""
     frame: MarketFrame
-    generated_signal: MultiAssetSignal
+    generated_decision: PendingDecision
     snapshot: PortfolioSnapshot
 
     @property
@@ -27,7 +28,6 @@ class BacktestRecord:
 @dataclass(frozen=True)
 class BacktestResult:
     """Run metadata, chronological records, trades, and attempted orders."""
-    allocation: AssetAllocation
     initial_cash: float
     records: Sequence[BacktestRecord]
     trades: Sequence[Trade]

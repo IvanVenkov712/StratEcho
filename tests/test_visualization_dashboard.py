@@ -48,7 +48,7 @@ def populated_result() -> BacktestResult:
                 close=close,
                 volume=1_000,
             )}),
-            generated_signal=MultiAssetSignal({"AAPL": signal}),
+            generated_decision=MultiAssetSignal({"AAPL": signal}),
             snapshot=PortfolioSnapshot(
                 cash=cash,
                 value=value,

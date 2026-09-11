@@ -82,7 +82,7 @@ def make_record(
 ) -> BacktestRecord:
     return BacktestRecord(
         frame=MarketFrame(timestamp, {"AAPL": make_candle(timestamp, close=close)}),
-        generated_signal=MultiAssetSignal({"AAPL": signal}),
+        generated_decision=MultiAssetSignal({"AAPL": signal}),
         snapshot=PortfolioSnapshot(
             cash=cash,
             value=value,
@@ -272,7 +272,7 @@ def test_multi_asset_series_keep_symbols_separate() -> None:
             "AAPL": make_candle(START, close=100),
             "MSFT": make_candle(START, close=200),
         }),
-        generated_signal=MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.SELL}),
+        generated_decision=MultiAssetSignal({"AAPL": Signal.BUY, "MSFT": Signal.SELL}),
         snapshot=PortfolioSnapshot(cash=0, positions={"AAPL": 3, "MSFT": 4}, value=1100),
     )
     result = replace(
