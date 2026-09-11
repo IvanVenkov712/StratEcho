@@ -4,7 +4,7 @@ from typing import Callable, Sequence
 from backtester.domain.trading import PendingDecision, RebalanceDecision, Order, Side
 from backtester.execution.broker import Broker
 from backtester.execution.decision_execution.decision_executor import DecisionExecutor, DecisionExecutionResult
-from backtester.rebalance.rebalance_planner import RebalancePlanner
+from backtester.rebalance.rebalance_planner import RebalancePlanner, RebalanceContext
 
 
 class RebalanceDecisionExecutor(DecisionExecutor):
@@ -31,9 +31,13 @@ class RebalanceDecisionExecutor(DecisionExecutor):
         rebalance_decision: RebalanceDecision = pending_decision
 
         orders = self._planner.get_orders(
-            rebalance_decision.target,
-            self._broker.portfolio.snapshot(prices),
-            prices
+            RebalanceContext(
+                execution_timestamp=timestamp,
+                decision_timestamp=rebalance_decision.timestamp,
+                target=rebalance_decision.target,
+                snapshot=self._broker.portfolio.snapshot(prices),
+                prices=prices
+            )
         )
 
         sorted_orders = self.sort_orders(orders)

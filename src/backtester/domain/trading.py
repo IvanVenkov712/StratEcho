@@ -136,15 +136,16 @@ class OrderExecutionResult:
 
 @dataclass(frozen=True)
 class TargetAllocation:
-    timestamp: datetime
     weights: Mapping[str, float]
 
     def __post_init__(self):
-        _validate_timestamp(self.timestamp)
         _validate_weights(self.weights)
 
+@dataclass(frozen=True)
 class PendingDecision:
-    pass
+    timestamp: datetime
+    def __post_init__(self):
+        _validate_timestamp(self.timestamp)
 
 @dataclass(frozen=True)
 class SignalDecision(PendingDecision):

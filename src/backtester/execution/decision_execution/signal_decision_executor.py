@@ -39,7 +39,7 @@ class SignalDecisionExecutor(DecisionExecutor):
             raise ValueError("SignalDecision is expected")
 
         signal_decision: SignalDecision = pending_decision
-        intents = self._create_order_intents(timestamp, signal_decision.signal)
+        intents = self._create_order_intents(signal_decision.timestamp, signal_decision.signal)
         return self._order_execution_results(intents, timestamp, prices)
 
     def _order_execution_results(
