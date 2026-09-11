@@ -6,7 +6,7 @@ import pytest
 
 from backtester.domain.market import Candle, MarketFrame
 from backtester.engine.backtest import BacktestEngine
-from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
+from backtester.order_resolving.order_resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.domain.trading import (

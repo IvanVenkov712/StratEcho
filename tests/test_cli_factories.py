@@ -25,7 +25,7 @@ from backtester.execution.costs import (
     NoCommissionModel,
     ProportionalCommissionModel,
 )
-from backtester.resolving.resolver import OrderResolutionContext
+from backtester.order_resolving.order_resolver import OrderResolutionContext
 from backtester.sizing.policy import SizingPlan
 from backtester.sizing.asset_allocation import AssetAllocation
 

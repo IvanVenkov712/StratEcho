@@ -19,7 +19,7 @@ from backtester.domain.trading import (
 )
 from backtester.engine.backtest import BacktestEngine
 from backtester.execution.broker import Broker
-from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
+from backtester.order_resolving.order_resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.strategies.multi_asset.base import MultiAssetStrategy

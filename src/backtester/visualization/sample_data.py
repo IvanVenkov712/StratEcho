@@ -14,7 +14,7 @@ from backtester.execution.costs import (
     ExecutionCostCalculator,
 )
 from backtester.portfolio.portfolio import Portfolio
-from backtester.resolving.resolver import OrderResolver, QuantityResolver, BuyQuantityCapper
+from backtester.order_resolving.order_resolver import OrderResolver, QuantityResolver, BuyQuantityCapper
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan, SizingPlan
 from backtester.strategies.multi_asset.simple_multi_asset import SimpleMultiAssetStrategy

@@ -29,7 +29,7 @@ from backtester.metrics.metrics import (
     number_of_trades,
     total_return,
 )
-from backtester.resolving.resolver import (
+from backtester.order_resolving.order_resolver import (
     BufferQuantityResolver,
     BuyQuantityCapper,
     OrderResolver,

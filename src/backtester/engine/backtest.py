@@ -8,7 +8,7 @@ from backtester.domain.market import MarketFrame
 from backtester.domain.trading import Signal, Order, OrderIntent, Side, OrderExecutionResult, MultiAssetSignal, Trade
 from backtester.engine.backtest_result import BacktestResult, BacktestRecord
 from backtester.execution.broker import Broker
-from backtester.resolving.resolver import OrderResolver, OrderResolutionContext
+from backtester.order_resolving.order_resolver import OrderResolver, OrderResolutionContext
 from backtester.sizing.asset_allocation import AssetAllocation
 from backtester.sizing.policy import MultiAssetSizingPlan
 from backtester.strategies.multi_asset.base import MultiAssetStrategy

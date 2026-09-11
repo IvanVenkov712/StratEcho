@@ -4,7 +4,7 @@ from unittest.mock import Mock
 import pytest
 
 from backtester.execution.costs import CommissionModel, ExecutionModel, ExecutionCostCalculator
-from backtester.resolving.resolver import (
+from backtester.order_resolving.order_resolver import (
     BufferQuantityResolver,
     BuyQuantityCapper,
     OrderResolver,
