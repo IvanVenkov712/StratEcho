@@ -148,8 +148,7 @@ class PendingDecision:
 
 @dataclass(frozen=True)
 class SignalDecision(PendingDecision):
-    intents: tuple[OrderIntent, ...]
-
+    signal: MultiAssetSignal
 
 @dataclass(frozen=True)
 class RebalanceDecision(PendingDecision):
