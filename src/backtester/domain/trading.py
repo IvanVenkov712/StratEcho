@@ -136,9 +136,12 @@ class OrderExecutionResult:
 
 @dataclass(frozen=True)
 class TargetAllocation:
+    """Immutable target weights; omitted holdings have a zero target weight."""
+
     weights: Mapping[str, float]
 
     def __post_init__(self):
+        object.__setattr__(self, "weights", MappingProxyType(dict(self.weights)))
         _validate_weights(self.weights)
 
 @dataclass(frozen=True)

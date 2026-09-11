@@ -30,17 +30,19 @@ class RebalanceDecisionExecutor(DecisionExecutor):
             raise ValueError("RebalanceDecision is expected")
 
         rebalance_decision: RebalanceDecision = pending_decision
+        snapshot = self._broker.portfolio.snapshot(prices)
 
         intents = self._planner.get_intents(
             RebalanceContext(
                 execution_timestamp=timestamp,
                 decision_timestamp=rebalance_decision.timestamp,
                 target=rebalance_decision.target,
-                snapshot=self._broker.portfolio.snapshot(prices),
+                snapshot=snapshot,
                 prices=prices
             )
         )
-        allocation = AssetAllocation(
-            allocations=dict(rebalance_decision.target.weights)
-        )
+        # The resolver needs a weight even for sales of omitted holdings.
+        weights = dict.fromkeys(snapshot.positions, 0.0)
+        weights.update(rebalance_decision.target.weights)
+        allocation = AssetAllocation(allocations=weights)
         return self._intent_executor.execute(intents, timestamp, prices, allocation)

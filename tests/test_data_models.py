@@ -4,9 +4,25 @@ from math import inf
 import pytest
 
 from backtester.domain.market import Candle
-from backtester.domain.trading import MultiAssetSignal, Signal
+from backtester.domain.trading import MultiAssetSignal, Signal, TargetAllocation, RebalanceDecision
 
 TIMESTAMP = datetime(2026, 1, 1)
+
+
+def test_queued_target_preserves_weights_when_source_dictionary_changes() -> None:
+    weights = {"A": 1.0}
+    decision = RebalanceDecision(TIMESTAMP, TargetAllocation(weights))
+    weights["A"] = -1.0
+    weights["B"] = 1.0
+
+    assert decision.target.weights == {"A": 1.0}
+
+
+def test_target_weights_cannot_be_modified() -> None:
+    target = TargetAllocation({"A": 1.0})
+
+    with pytest.raises(TypeError):
+        target.weights["A"] = 0.0
 
 
 def test_multi_asset_signals_preserve_history_when_strategy_reuses_dictionary() -> None:
