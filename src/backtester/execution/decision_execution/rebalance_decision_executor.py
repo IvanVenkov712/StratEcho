@@ -30,7 +30,7 @@ class RebalanceDecisionExecutor(DecisionExecutor):
 
         rebalance_decision: RebalanceDecision = pending_decision
 
-        orders = self._planner.get_orders(
+        orders = self._planner.get_intents(
             RebalanceContext(
                 execution_timestamp=timestamp,
                 decision_timestamp=rebalance_decision.timestamp,
