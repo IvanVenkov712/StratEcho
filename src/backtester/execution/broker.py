@@ -14,7 +14,15 @@ from backtester.domain.trading import Side, Trade, Order, OrderExecutionResult, 
 
 
 class Broker:
-    """Execute validated orders and apply successful fills to a portfolio."""
+    """Execute validated orders and apply successful fills to a portfolio.
+
+    Buy costs are checked against cash with ``fits_budget``. Sell commissions
+    are checked against cash plus sale proceeds using the same tolerance.
+    After acceptance, a negative cash remainder within that tolerance is
+    clamped to zero; positive remainders are preserved at float precision.
+    Recorded fill prices and commissions retain their calculated values, so
+    this clamp can cause a reconciliation difference within the tolerance.
+    """
 
     _portfolio: Portfolio
     _execution_model: ExecutionModel

@@ -277,6 +277,45 @@ individual rejection details with the concise reason `Insufficient funds` or
 `Insufficient position` when there are at most 10 rejected orders; above that
 limit, it displays the rejection count without listing every order.
 
+### Rounding and affordability
+
+Prices, commissions, and cash calculations use Python binary floating-point
+arithmetic. The engine keeps their calculated precision rather than rounding
+each transaction to cents or an exchange tick size. Formatting in reports
+does not change the amounts used by the backtest.
+
+The quantity capper and broker share `fits_budget` from
+`src/backtester/execution/costs.py`. A cost at or below its budget is accepted.
+For finite amounts, a cost above budget is also accepted when:
+
+```text
+cost - budget <= max(1e-9, 1e-12 * max(abs(cost), abs(budget)))
+```
+
+`DEF_ABS_TOL = 1e-9` is measured in cash units; `DEF_REL_TOL = 1e-12` is a
+relative fraction. These are fixed code constants, with no CLI or TOML option.
+The relative tolerance allows a larger absolute difference for larger amounts.
+This is an explicit numerical allowance at the affordability boundary.
+
+For buys, the checked cost includes the fill notional and commission. For
+sells, the broker checks commission against existing cash plus sale proceeds.
+After an accepted execution, a negative cash remainder within the tolerance
+is clamped to exactly zero. Small positive remainders are preserved. Recorded
+fill prices and commissions remain unchanged, so reconciling trades with cash
+may leave a difference within the tolerance for each clamped execution.
+Shortfalls beyond the tolerance remain unaffordable.
+
+For example, three shares at `0.1` with no fees should fit a `0.3` budget, but
+Python calculates `3 * 0.1` as `0.30000000000000004`. The capper returns three
+shares, and the broker accepts the buy and leaves zero cash. A `0.31` cost
+against the same `0.3` budget is rejected.
+
+Share quantities are whole numbers. Budget-based buys select the largest
+affordable whole-share quantity under this policy, subject to any explicit
+quantity cap. Percentage sells use `int(owned_quantity * fraction)`, truncating
+the non-negative float product toward zero without an extra tolerance. Thus,
+selling 50% of five shares sells two shares.
+
 ## Documentation
 
 - [TOML configuration](docs/configuration.md): precedence, paths, complete file

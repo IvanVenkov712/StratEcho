@@ -246,5 +246,10 @@ The CLI applies it by wrapping the base `QuantityResolver` in a
 `BufferQuantityResolver`. Both resolvers share one `BuyQuantityCapper`, so buy
 affordability uses the same commission and slippage models as the broker.
 
+The shared affordability tolerance is fixed in code and has no TOML setting.
+It is independent of `buffer_rate`; see
+[Rounding and affordability](../README.md#rounding-and-affordability) for its
+values and the treatment of cash remainders and whole-share quantities.
+
 See the [CLI reference](cli.md) for all commands and options, or return to the
 [project README](../README.md).

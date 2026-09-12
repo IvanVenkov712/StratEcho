@@ -351,6 +351,12 @@ submission time is the next-candle-open time, not the preceding signal time.
 For larger rejection counts, the CLI prints the total and omits the individual
 details. Comparison runs report strategy and benchmark rejections separately.
 
+Affordability uses a shared floating-point tolerance, and accepted executions
+clamp tiny negative cash remainders to zero. Prices and fees retain their
+calculated precision. See [Rounding and affordability](../README.md#rounding-and-affordability)
+for the exact tolerance, examples, and whole-share sizing rules. The tolerance
+has no CLI option and is independent of `--buffer-rate`.
+
 ## Strategy options
 
 | CLI names | Relevant options |

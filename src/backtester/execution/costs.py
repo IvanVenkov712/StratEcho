@@ -6,6 +6,7 @@ from numbers import Real
 
 from backtester.domain.trading import Side
 
+# Shared affordability tolerances: relative fraction and absolute cash units.
 DEF_REL_TOL = 1e-12
 DEF_ABS_TOL = 1e-9
 
@@ -31,6 +32,14 @@ class ExecutionModel:
             raise ValueError("Unknown side")
 
 def fits_budget(cost: float, budget: float) -> bool:
+    """Accept a cost within budget, allowing floating-point boundary error.
+
+    For finite inputs, an excess is accepted when it is at most
+    max(DEF_ABS_TOL, DEF_REL_TOL * max(abs(cost), abs(budget))). The absolute
+    tolerance is in cash units; the relative tolerance scales with the amounts.
+    Values are compared without rounding to currency decimals. This shared
+    rule keeps buy sizing and broker affordability checks consistent.
+    """
     return cost <= budget or isclose(
         cost,
         budget,

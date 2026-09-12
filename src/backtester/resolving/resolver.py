@@ -57,8 +57,12 @@ class BuyQuantityCapper:
 
         Affordability includes the configured buy slippage and commission. A
         zero result means that no positive whole-share quantity fits the budget.
+        ``fits_budget`` applies the same floating-point tolerance as the broker;
+        quantities remain integers and never exceed ``max_quantity`` if given.
         """
 
+        # Float floor division can undercount an exact boundary (0.3 // 0.1).
+        # Include the next share as a candidate, then check its full cost.
         quantity = int(budget // reference_price) + 1
 
         if max_quantity is not None:
@@ -87,7 +91,9 @@ class QuantityResolver:
     the requested quantity only when it fits the budget, otherwise ``-1``;
     OrderResolver then skips the intent without a recorded broker rejection.
 
-    Percent sells use a fraction of owned shares, rounded down. Sell quantities
+    Percent sells truncate the non-negative float product of owned shares and
+    the requested fraction with ``int``; no affordability tolerance is applied
+    to that quantity calculation. Sell quantities
     never exceed the current position except in fixed mode, where the broker
     performs that validation. Allocation weights do not limit sell quantities.
     """
