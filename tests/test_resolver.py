@@ -142,6 +142,29 @@ def test_buy_quantity_capper_returns_the_largest_affordable_quantity() -> None:
     assert quantity == 10
 
 
+@pytest.mark.parametrize(
+    ("budget", "max_quantity", "expected_quantity"),
+    [
+        pytest.param(0.3, None, 3, id="floating-point-roundoff"),
+        pytest.param(0.3, 2, 2, id="explicit-quantity-limit"),
+        pytest.param(0.3 - 1e-8, None, 2, id="shortfall-outside-tolerance"),
+    ],
+)
+def test_buy_quantity_capper_handles_fractional_price_budget_boundary(
+    budget: float, max_quantity: int | None, expected_quantity: int,
+) -> None:
+    cost_calculator = Mock(spec=ExecutionCostCalculator)
+    cost_calculator.estimate_buy_cost.side_effect = (
+        lambda quantity, reference_price: quantity * reference_price
+    )
+    capper = BuyQuantityCapper(cost_calculator)
+
+    # Three shares cost 0.3 mathematically, but 3 * 0.1 is slightly greater.
+    quantity = capper.cap(budget, reference_price=0.1, max_quantity=max_quantity)
+
+    assert quantity == expected_quantity
+
+
 def test_buy_quantity_capper_accounts_for_execution_costs() -> None:
     cost_calculator = Mock(spec=ExecutionCostCalculator)
     cost_calculator.estimate_buy_cost.side_effect = (

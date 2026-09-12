@@ -8,7 +8,7 @@ from backtester.exceptions.trading_errors import (
     InsufficientFundsError,
     InsufficientPositionError,
 )
-from backtester.execution.costs import CommissionModel, ExecutionModel
+from backtester.execution.costs import CommissionModel, ExecutionModel, fits_budget
 from backtester.portfolio.portfolio import Portfolio
 from backtester.domain.trading import Side, Trade, Order, OrderExecutionResult, OrderExecutionStatus
 
@@ -38,10 +38,11 @@ class Broker:
             raise ValueError("Price must be positive.")
 
         cost = fill_price * order.quantity + commission
-        if cost > self._portfolio.cash:
+        if not fits_budget(cost, self._portfolio.cash):
             raise InsufficientFundsError
 
-        self._portfolio.cash -= cost
+        remaining_cash = self._portfolio.cash - cost
+        self._portfolio.cash = max(0.0, remaining_cash)
         self._portfolio.add_position(order.symbol, order.quantity)
 
     def _sell(self, order: Order, fill_price: float, commission: float):
@@ -53,11 +54,12 @@ class Broker:
         if order.quantity > owned:
             raise InsufficientPositionError
 
-        new_cash = self._portfolio.cash + order.quantity * fill_price - commission
-        if new_cash < 0:
+        new_budget = self._portfolio.cash + order.quantity * fill_price
+        if not fits_budget(commission, new_budget):
             raise InsufficientFundsError("Not enough cash for the commission")
 
-        self._portfolio.cash = new_cash
+        new_cash = new_budget - commission
+        self._portfolio.cash = max(0, new_cash)
         self._portfolio.remove_position(order.symbol, order.quantity)
 
     def _execute_internal(self, order: Order, prices: dict[str, float], timestamp: datetime) -> Trade:

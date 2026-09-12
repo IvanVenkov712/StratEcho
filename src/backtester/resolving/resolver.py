@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from backtester.execution.costs import ExecutionCostCalculator
+from backtester.execution.costs import ExecutionCostCalculator, fits_budget
 from backtester.domain.trading import Side, SizingMode, SizingInstruction, Order, OrderIntent, PortfolioSnapshot
 from backtester.sizing.asset_allocation import AssetAllocation
 
@@ -70,16 +70,12 @@ class BuyQuantityCapper:
         while left <= right:
             middle = left + int((right - left) // 2)
             cost = self._cost_calculator.estimate_buy_cost(middle, reference_price)
-            if cost > budget:
-                right = middle - 1
-            else:
+            if fits_budget(cost, budget):
                 left = middle + 1
+            else:
+                right = middle - 1
 
         return right
-
-        # while quantity > 0 and self._cost_calculator.estimate_buy_cost(quantity, reference_price) > budget:
-        #    quantity -= 1
-        # return quantity
 
 
 class QuantityResolver:

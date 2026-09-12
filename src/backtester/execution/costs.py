@@ -1,11 +1,13 @@
 """Slippage, commission, and estimated execution-cost models."""
 
 from abc import ABC, abstractmethod
-from math import isfinite
+from math import isfinite, isclose
 from numbers import Real
 
 from backtester.domain.trading import Side
 
+DEF_REL_TOL = 1e-12
+DEF_ABS_TOL = 1e-9
 
 class ExecutionModel:
     """Apply symmetric adverse slippage to buy and sell reference prices."""
@@ -27,6 +29,14 @@ class ExecutionModel:
             return reference_price * (1 - self._slippage_rate)
         else:
             raise ValueError("Unknown side")
+
+def fits_budget(cost: float, budget: float) -> bool:
+    return cost <= budget or isclose(
+        cost,
+        budget,
+        rel_tol=DEF_REL_TOL,
+        abs_tol=DEF_ABS_TOL,
+    )
 
 class CommissionModel(ABC):
     """Interface for calculating a non-negative per-trade commission."""

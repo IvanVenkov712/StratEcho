@@ -89,6 +89,80 @@ def test_buy_order_uses_models_updates_portfolio_and_returns_trade() -> None:
     assert execution.trade == expected_trade
 
 
+@pytest.mark.parametrize(
+    ("quantity", "commission"),
+    [
+        pytest.param(3, 0.0, id="notional-roundoff"),
+        pytest.param(1, 0.2, id="commission-addition-roundoff"),
+    ],
+)
+def test_buy_accepts_roundoff_and_clamps_remaining_cash_to_zero(
+    quantity: int, commission: float,
+) -> None:
+    portfolio = make_portfolio_mock(cash=0.3)
+    broker, _, _ = make_broker(portfolio, fill_price=0.1, commission=commission)
+    order = make_order("AAPL", Side.BUY, quantity=quantity)
+    assert quantity * 0.1 + commission > portfolio.cash
+
+    execution = execute_order(broker, order, price=0.1)
+
+    assert execution.status is OrderExecutionStatus.SUCCESS
+    assert execution.trade is not None
+    assert portfolio.cash == 0.0
+    portfolio.add_position.assert_called_once_with("AAPL", quantity)
+    portfolio.remove_position.assert_not_called()
+
+
+def test_sell_accepts_commission_roundoff_and_clamps_remaining_cash_to_zero() -> None:
+    portfolio = make_portfolio_mock(cash=0.0, owned_quantity=1)
+    # Proceeds equal 0.3; the fee calculation rounds slightly above them.
+    commission = 3 * 0.1
+    broker, _, _ = make_broker(portfolio, fill_price=0.3, commission=commission)
+    order = make_order("AAPL", Side.SELL, quantity=1)
+    assert commission > portfolio.cash + 0.3
+
+    execution = execute_order(broker, order, price=0.3)
+
+    assert execution.status is OrderExecutionStatus.SUCCESS
+    assert execution.trade is not None
+    assert portfolio.cash == 0.0
+    portfolio.remove_position.assert_called_once_with("AAPL", 1)
+    portfolio.add_position.assert_not_called()
+
+
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+def test_execution_rejects_shortfall_outside_tolerance_without_portfolio_updates(
+    side: Side,
+) -> None:
+    portfolio = make_portfolio_mock(cash=0.3, owned_quantity=1)
+    commission = 1e-8 if side is Side.BUY else 0.6 + 1e-8
+    broker, _, _ = make_broker(portfolio, fill_price=0.3, commission=commission)
+    order = make_order("AAPL", side, quantity=1)
+
+    execution = execute_order(broker, order, price=0.3)
+
+    assert execution.status is OrderExecutionStatus.INSUFFICIENT_FUNDS
+    assert execution.trade is None
+    assert portfolio.cash == 0.3
+    portfolio.add_position.assert_not_called()
+    portfolio.remove_position.assert_not_called()
+
+
+@pytest.mark.parametrize("side", [Side.BUY, Side.SELL])
+def test_execution_preserves_small_positive_cash_remainder(side: Side) -> None:
+    portfolio = make_portfolio_mock(cash=0.3, owned_quantity=1)
+    fill_price = 0.3 - 5e-10 if side is Side.BUY else 0.3
+    commission = 0.0 if side is Side.BUY else 0.6 - 5e-10
+    broker, _, _ = make_broker(portfolio, fill_price=fill_price, commission=commission)
+    order = make_order("AAPL", side, quantity=1)
+
+    execution = execute_order(broker, order, price=fill_price)
+
+    assert execution.status is OrderExecutionStatus.SUCCESS
+    assert 0.0 < portfolio.cash < 1e-9
+    assert portfolio.cash == pytest.approx(5e-10, rel=1e-6, abs=0.0)
+
+
 def test_buy_without_enough_cash_returns_rejection_without_updating_portfolio() -> None:
     portfolio = make_portfolio_mock(cash=100)
     broker, execution_model, commission_model = make_broker(
